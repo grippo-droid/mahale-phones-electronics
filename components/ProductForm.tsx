@@ -61,6 +61,12 @@ type Props = {
   onSubmit: (product: NewProduct) => void | Promise<void>;
   /** Rendered under the save button — used by T2.5/T2.6 to add delete/restock. */
   footer?: React.ReactNode;
+  /**
+   * Hidden on the edit screen, where stock is changed through StockAdjuster
+   * instead. Two controls writing the same column would let a stale form value
+   * silently undo an adjustment made moments earlier.
+   */
+  showStockField?: boolean;
 };
 
 export default function ProductForm({
@@ -69,6 +75,7 @@ export default function ProductForm({
   busy = false,
   onSubmit,
   footer,
+  showStockField = true,
 }: Props) {
   const [values, setValues] = useState<ProductFormValues>(initialValues);
   const [errors, setErrors] = useState<FieldErrors>({});
@@ -132,18 +139,20 @@ export default function ProductForm({
         </Field>
 
         <View style={styles.row}>
-          <View style={styles.flex}>
-            <Field label="Stock quantity" required error={errors.stockQty}>
-              <TextInput
-                style={[styles.input, errors.stockQty && styles.inputError]}
-                value={values.stockQty}
-                onChangeText={(text) => set('stockQty', text)}
-                placeholder="0"
-                placeholderTextColor={Colors.textMuted}
-                keyboardType="number-pad"
-              />
-            </Field>
-          </View>
+          {showStockField ? (
+            <View style={styles.flex}>
+              <Field label="Opening stock" required error={errors.stockQty}>
+                <TextInput
+                  style={[styles.input, errors.stockQty && styles.inputError]}
+                  value={values.stockQty}
+                  onChangeText={(text) => set('stockQty', text)}
+                  placeholder="0"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="number-pad"
+                />
+              </Field>
+            </View>
+          ) : null}
           <View style={styles.flex}>
             <Field label="Unit price (₹)" required error={errors.unitPrice}>
               <TextInput

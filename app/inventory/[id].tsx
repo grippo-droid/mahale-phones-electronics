@@ -1,12 +1,22 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import ProductForm, { type ProductFormValues } from '@/components/ProductForm';
+import StockAdjuster from '@/components/StockAdjuster';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import { getProductById, updateProduct, type NewProduct, type Product } from '@/db/products';
+import {
+  deleteProduct,
+  getProductById,
+  updateProduct,
+  type NewProduct,
+  type Product,
+} from '@/db/products';
 
-/** Edit Product (T2.4). Delete (T2.5) and stock adjustment (T2.6) are added here next. */
+/**
+ * Edit Product (T2.4), with delete (T2.5) and manual stock adjustment (T2.6).
+ */
 export default function EditProductScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const navigation = useNavigation();
@@ -43,13 +53,45 @@ export default function EditProductScreen() {
   const handleSubmit = async (updates: NewProduct) => {
     setBusy(true);
     try {
-      await updateProduct(productId, updates);
+      // Stock is owned by StockAdjuster on this screen and has already been
+      // written; the form's copy is stale by definition, so it is dropped.
+      const { stock_qty: _ignored, ...detailsOnly } = updates;
+      await updateProduct(productId, detailsOnly);
       router.back();
     } catch (err) {
       Alert.alert('Could not save', err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
+  };
+
+  const confirmDelete = () => {
+    if (!product) return;
+
+    Alert.alert(
+      `Delete ${product.name}?`,
+      'This removes the product from your inventory. Past bills that include it are not ' +
+        'affected — they keep their own record of the name and price, so old invoices stay ' +
+        'correct and can still be reprinted.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              await deleteProduct(productId);
+              router.back();
+            } catch (err) {
+              Alert.alert('Could not delete', err instanceof Error ? err.message : String(err));
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ]
+    );
   };
 
   if (loading) {
@@ -75,6 +117,22 @@ export default function EditProductScreen() {
       submitLabel="Save changes"
       busy={busy}
       onSubmit={handleSubmit}
+      showStockField={false}
+      footer={
+        <>
+          <StockAdjuster product={product} onChanged={setProduct} />
+
+          <Pressable
+            style={[styles.deleteButton, busy && styles.disabled]}
+            onPress={confirmDelete}
+            disabled={busy}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${product.name}`}>
+            <Ionicons name="trash-outline" size={20} color={Colors.outOfStock} />
+            <Text style={styles.deleteText}>Delete product</Text>
+          </Pressable>
+        </>
+      }
     />
   );
 }
@@ -106,4 +164,17 @@ const styles = StyleSheet.create({
   },
   errorTitle: { fontSize: FontSizes.title, fontWeight: '700', color: Colors.text },
   errorBody: { fontSize: FontSizes.body, color: Colors.textMuted, textAlign: 'center' },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.lg,
+    minHeight: Spacing.minTapTarget,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.outOfStock,
+  },
+  deleteText: { fontSize: FontSizes.body, color: Colors.outOfStock, fontWeight: '700' },
+  disabled: { opacity: 0.5 },
 });
