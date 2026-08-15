@@ -16,6 +16,7 @@ import { countLowStockProducts, countProducts, listProducts } from '@/db/product
 import { clearAllData, seedDatabase } from '@/db/seed';
 import type { BillRow } from '@/db/schema';
 import type { Product } from '@/db/products';
+import { formatRupees } from '@/lib/format';
 
 /**
  * TEMPORARY database verification panel (T1.5).
@@ -229,14 +230,6 @@ function stockColour(status: Product['stockStatus']): string {
     default:
       return Colors.inStock;
   }
-}
-
-/** Indian digit grouping (1,23,456.78) — Frontend Spec Section 4. */
-function formatRupees(amount: number): string {
-  return `₹${amount.toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
 }
 
 const styles = StyleSheet.create({

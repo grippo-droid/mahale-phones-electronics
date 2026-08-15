@@ -16,8 +16,22 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 export const DATABASE_NAME = 'mahale.db';
 
-/** Product categories (PRD 6.1). Extensible — adding a value needs no migration. */
-export const PRODUCT_CATEGORIES = ['CCTV', 'RO', 'Tube Light', 'Bulb', 'Other'] as const;
+/**
+ * Product categories (PRD 6.1).
+ *
+ * Presented as a fixed dropdown rather than free text: a typo like "cctv" beside
+ * "CCTV" would silently split a category in two, and that is tedious to clean up
+ * on a phone. Category is stored as TEXT, so adding an entry here needs no
+ * migration — existing products keep whatever value they already hold.
+ */
+export const PRODUCT_CATEGORIES = [
+  'CCTV',
+  'RO',
+  'Tube Light',
+  'Bulb',
+  'Wiring & Electrical',
+  'Other',
+] as const;
 export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
 
 /** Standard Indian GST slabs (Frontend Spec 2.3). */

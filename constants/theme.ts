@@ -1,14 +1,12 @@
 /**
  * Colour, spacing and type scale per Frontend Spec Section 3.
  *
- * NOTE: `brand` is a PLACEHOLDER blue. Frontend Spec Section 6 lists "confirm
- * brand colours (existing shop branding, if any)" as an open decision — swap
- * this once the shop's signage/logo colours are confirmed. The full visual pass
- * lands in T7.4.
+ * The brand blue below is confirmed and final — the Frontend Spec Section 6 open
+ * decision on branding is closed. The remaining visual pass lands in T7.4.
  */
 
 export const Colors = {
-  brand: '#1565C0', // PLACEHOLDER — pending confirmation of shop branding
+  brand: '#1565C0',
   brandDark: '#0D47A1',
 
   // Status colours (Frontend Spec 3): green in-stock, amber low, red out/error.

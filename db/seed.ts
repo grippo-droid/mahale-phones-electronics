@@ -62,13 +62,17 @@ export const SAMPLE_PRODUCTS: NewProduct[] = [
   { name: 'Orient LED Bulb 5W', category: 'Bulb', brand: 'Orient',
     stock_qty: 0, unit_price: 70, gst_rate: 12, hsn_code: '85395000' },
 
-  // --- Other ---
-  { name: 'Copper Wire 1.5mm (90m roll)', category: 'Other', brand: 'Finolex',
+  // --- Wiring & Electrical ---
+  { name: 'Copper Wire 1.5mm (90m roll)', category: 'Wiring & Electrical', brand: 'Finolex',
     stock_qty: 15, unit_price: 1250, gst_rate: 18, hsn_code: '85444910' },
-  { name: 'MCB 16A Single Pole', category: 'Other', brand: 'Havells',
+  { name: 'MCB 16A Single Pole', category: 'Wiring & Electrical', brand: 'Havells',
     stock_qty: 22, unit_price: 240, gst_rate: 18, hsn_code: '85362000' },
-  { name: 'Extension Board 4 Socket', category: 'Other', brand: 'Anchor',
+  { name: 'Extension Board 4 Socket', category: 'Wiring & Electrical', brand: 'Anchor',
     stock_qty: 1, unit_price: 320, gst_rate: 18, hsn_code: '85366990' },
+
+  // --- Other ---
+  { name: 'Universal Remote for DVR', category: 'Other', brand: 'Generic',
+    stock_qty: 7, unit_price: 180, gst_rate: 18, hsn_code: '85269200' },
 ];
 
 export type SeedResult = {
