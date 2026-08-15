@@ -17,6 +17,7 @@ import type { NewProduct } from '@/db/products';
 import { GST_RATE_SLABS, PRODUCT_CATEGORIES } from '@/db/schema';
 import { formatRupees } from '@/lib/format';
 import { splitPrice } from '@/lib/gst';
+import { calculateMargin } from '@/lib/margin';
 
 /**
  * Shared add/edit product form (T2.3, T2.4).
@@ -41,6 +42,8 @@ export type ProductFormValues = {
   modelNumber: string;
   lowStockThreshold: string;
   priceIncludesGst: boolean;
+  /** Internal cost reference — never printed on a bill. */
+  purchasePrice: string;
 };
 
 export const EMPTY_PRODUCT_FORM: ProductFormValues = {
@@ -54,6 +57,7 @@ export const EMPTY_PRODUCT_FORM: ProductFormValues = {
   modelNumber: '',
   lowStockThreshold: '',
   priceIncludesGst: false,
+  purchasePrice: '',
 };
 
 type FieldErrors = Partial<Record<keyof ProductFormValues, string>>;
@@ -218,6 +222,27 @@ export default function ProductForm({
           priceIncludesGst={values.priceIncludesGst}
         />
 
+        <Field
+          label="Purchase price (₹)"
+          error={errors.purchasePrice}
+          hint="Optional. What you paid per unit — for your reference only, never shown on a bill.">
+          <TextInput
+            style={[styles.input, errors.purchasePrice && styles.inputError]}
+            value={values.purchasePrice}
+            onChangeText={(text) => set('purchasePrice', text)}
+            placeholder="Not recorded"
+            placeholderTextColor={Colors.textMuted}
+            keyboardType="decimal-pad"
+          />
+        </Field>
+
+        <MarginPreview
+          purchasePrice={values.purchasePrice}
+          unitPrice={values.unitPrice}
+          gstRate={values.gstRate}
+          priceIncludesGst={values.priceIncludesGst}
+        />
+
         <Field label="HSN code" error={errors.hsnCode} hint="Optional, but needed on GST bills">
           <TextInput
             style={[styles.input, errors.hsnCode && styles.inputError]}
@@ -348,6 +373,89 @@ function PricePreview({
   );
 }
 
+/**
+ * Live profit indicator. Appears only once both a cost and a selling price are
+ * present, so it never nags on a product whose cost was not recorded.
+ *
+ * Internal to the app — this is the figure the shop should not show a customer.
+ */
+function MarginPreview({
+  purchasePrice,
+  unitPrice,
+  gstRate,
+  priceIncludesGst,
+}: {
+  purchasePrice: string;
+  unitPrice: string;
+  gstRate: number;
+  priceIncludesGst: boolean;
+}) {
+  const cost = purchasePrice.trim() === '' ? null : Number(purchasePrice.trim());
+  const selling = Number(unitPrice.trim());
+  const margin = calculateMargin(cost, selling, gstRate, priceIncludesGst);
+
+  if (!margin) return null;
+
+  const tone = margin.isLoss ? Colors.outOfStock : Colors.inStock;
+
+  return (
+    <View style={[styles.preview, styles.marginPreview, { borderColor: tone }]}>
+      <View style={styles.previewRow}>
+        <Text style={styles.previewLabel}>You keep (price before GST)</Text>
+        <Text style={styles.previewValue}>{formatRupees(margin.netSellingPrice)}</Text>
+      </View>
+      <View style={styles.previewRow}>
+        <Text style={styles.previewLabel}>You paid</Text>
+        <Text style={styles.previewValue}>−{formatRupees(margin.cost)}</Text>
+      </View>
+
+      <View style={styles.previewDivider} />
+
+      <View style={styles.previewRow}>
+        <Text style={[styles.previewLabel, { color: tone, fontWeight: '700' }]}>
+          {margin.isLoss ? 'Loss per unit' : 'Profit per unit'}
+        </Text>
+        <Text style={[styles.previewValue, styles.previewValueStrong, { color: tone }]}>
+          {formatRupees(Math.abs(margin.profit))}
+        </Text>
+      </View>
+
+      <View style={styles.marginPercentRow}>
+        {margin.marginPercent !== null ? (
+          <View style={styles.marginPercentBox}>
+            <Text style={[styles.marginPercentValue, { color: tone }]}>
+              {margin.marginPercent}%
+            </Text>
+            <Text style={styles.marginPercentLabel}>margin{'\n'}(of what you keep)</Text>
+          </View>
+        ) : null}
+        {margin.markupPercent !== null ? (
+          <View style={styles.marginPercentBox}>
+            <Text style={[styles.marginPercentValue, { color: tone }]}>
+              {margin.markupPercent}%
+            </Text>
+            <Text style={styles.marginPercentLabel}>markup{'\n'}(added to cost)</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {margin.isLoss ? (
+        <View style={styles.warning}>
+          <Ionicons name="warning-outline" size={16} color={Colors.lowStock} />
+          <Text style={styles.warningText}>
+            This sells for less than it cost. Check the prices before saving.
+          </Text>
+        </View>
+      ) : null}
+
+      <Text style={styles.previewNote}>
+        Your own reference only — purchase price and profit never appear on a customer&apos;s
+        bill.
+      </Text>
+    </View>
+  );
+}
+
 function PreviewRow({
   label,
   value,
@@ -435,6 +543,17 @@ export function validate(values: ProductFormValues): {
     fieldErrors.gstRate = 'Choose a GST rate.';
   }
 
+  let purchasePrice: number | null = null;
+  const rawPurchase = values.purchasePrice.trim();
+  if (rawPurchase !== '') {
+    const parsed = Number(rawPurchase);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      fieldErrors.purchasePrice = 'Enter a valid amount, or leave it blank.';
+    } else {
+      purchasePrice = parsed;
+    }
+  }
+
   let lowStockThreshold: number | null = null;
   const rawThreshold = values.lowStockThreshold.trim();
   if (rawThreshold !== '') {
@@ -460,6 +579,7 @@ export function validate(values: ProductFormValues): {
       model_number: values.modelNumber.trim() || null,
       low_stock_threshold: lowStockThreshold,
       price_includes_gst: values.priceIncludesGst,
+      purchase_price: purchasePrice,
     },
     fieldErrors: {},
   };
@@ -528,6 +648,22 @@ const styles = StyleSheet.create({
   previewHighlightText: { color: Colors.brand },
   previewDivider: { height: 1, backgroundColor: Colors.border, marginVertical: Spacing.xs },
   previewNote: { fontSize: FontSizes.small - 1, color: Colors.textMuted, marginTop: Spacing.xs },
+  marginPreview: { borderWidth: 1 },
+  marginPercentRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.sm },
+  marginPercentBox: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderRadius: 8,
+    backgroundColor: Colors.background,
+  },
+  marginPercentValue: { fontSize: FontSizes.title, fontWeight: '700' },
+  marginPercentLabel: {
+    fontSize: FontSizes.small - 3,
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginTop: 2,
+  },
   saveButton: {
     backgroundColor: Colors.brand,
     borderRadius: 8,

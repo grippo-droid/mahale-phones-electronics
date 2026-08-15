@@ -66,6 +66,8 @@ export type NewProduct = {
   low_stock_threshold?: number | null;
   /** True when `unit_price` already contains GST. Defaults to false. */
   price_includes_gst?: boolean;
+  /** What the shop paid per unit. NULL/omitted means it was not recorded. */
+  purchase_price?: number | null;
 };
 
 export type ProductUpdate = Partial<NewProduct>;
@@ -182,8 +184,9 @@ export async function createProduct(
   const result = await db.runAsync(
     `INSERT INTO products
        (name, category, stock_qty, unit_price, gst_rate, hsn_code, brand,
-        model_number, low_stock_threshold, price_includes_gst, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        model_number, low_stock_threshold, price_includes_gst, purchase_price,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     input.name.trim(),
     input.category,
     input.stock_qty,
@@ -194,6 +197,7 @@ export async function createProduct(
     input.model_number?.trim() || null,
     input.low_stock_threshold ?? null,
     input.price_includes_gst ? 1 : 0,
+    input.purchase_price ?? null,
     now,
     now
   );
@@ -231,6 +235,9 @@ export async function updateProduct(
   }
   if (patch.price_includes_gst !== undefined) {
     assign('price_includes_gst', patch.price_includes_gst ? 1 : 0);
+  }
+  if (patch.purchase_price !== undefined) {
+    assign('purchase_price', patch.purchase_price ?? null);
   }
 
   if (columns.length === 0) {
@@ -327,6 +334,11 @@ function validateProductInput(
   }
   if (!partial || input.stock_qty !== undefined) {
     if (!Number.isInteger(input.stock_qty)) throw new Error('Stock quantity must be a whole number.');
+  }
+  if (input.purchase_price !== undefined && input.purchase_price !== null) {
+    if (!Number.isFinite(input.purchase_price) || input.purchase_price < 0) {
+      throw new Error('Purchase price must be zero or more.');
+    }
   }
   if (input.low_stock_threshold !== undefined && input.low_stock_threshold !== null) {
     if (!Number.isInteger(input.low_stock_threshold) || input.low_stock_threshold < 0) {

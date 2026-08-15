@@ -60,6 +60,15 @@ export type ProductRow = {
    * quotes MRP-inclusive prices on some lines and pre-tax prices on others.
    */
   price_includes_gst: number;
+  /**
+   * What the shop paid for one unit. NULL when it was not recorded — stock is
+   * sometimes added without the cost to hand.
+   *
+   * INTERNAL ONLY. This must never reach a customer: not on a bill, an invoice
+   * PDF, a thermal print, or anything shared out of the app. `bill_items` has no
+   * corresponding column by design, so a bill has nowhere to carry it.
+   */
+  purchase_price: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -199,10 +208,22 @@ const migration002: Migration = {
   },
 };
 
+const migration003: Migration = {
+  version: 3,
+  name: 'product_purchase_price',
+  up: async (db) => {
+    // Nullable with no default: "not recorded" and "cost was zero" are different
+    // statements, and only NULL can say the first one.
+    await db.execAsync(`
+      ALTER TABLE products ADD COLUMN purchase_price REAL;
+    `);
+  },
+};
+
 /**
  * Every migration ever shipped, in order. Append only.
  */
-export const MIGRATIONS: Migration[] = [migration001, migration002];
+export const MIGRATIONS: Migration[] = [migration001, migration002, migration003];
 
 /** The schema version the current build of the app expects. */
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce(

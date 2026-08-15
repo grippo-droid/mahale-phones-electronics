@@ -130,6 +130,21 @@ confirmation of the shop's existing signage/branding.
 - **Overselling is allowed.** The repository lets stock go negative; the UI warns
   at billing time. Negative stock is its own visual state ("Oversold"), distinct
   from out-of-stock, because it means the recorded count is wrong.
+- **Prices carry a per-product GST basis.** `products.price_includes_gst` decides
+  whether the entered price already contains GST (MRP-style, customer pays that
+  figure) or has GST added on top. The product form shows both figures live.
+- **Bill totals round to the nearest rupee**, with the difference shown as a
+  visible "Round Off" line on the invoice. Needed because reverse-calculating
+  tax out of an MRP lands up to a paisa away from the marked price — ten bulbs
+  marked ₹90 compute to ₹899.99. Storage is `bills.round_off` (migration 004,
+  lands with T3.6); the calculation is
+  `calculateBill(..., { roundToNearestRupee: true })`.
+- **`products.purchase_price` is strictly internal** (migration 003). It exists
+  so the owner can judge a selling price against what he paid. It must NEVER
+  appear on a bill, invoice PDF, thermal print, or anything shared out of the
+  app. `bill_items` has no column for it, so a bill has nowhere to carry it —
+  keep it that way. Profit is measured against the PRE-TAX selling price,
+  because GST collected is not the shop's money.
 - **HSN code is optional at save time, with a visible warning.** Products missing
   an HSN code are flagged in the Inventory list, AND the warning must surface
   again at bill-generation time in Phase 4 — an incomplete HSN reaches the

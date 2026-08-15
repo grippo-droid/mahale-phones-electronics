@@ -151,6 +151,7 @@ function toFormValues(product: Product): ProductFormValues {
     lowStockThreshold:
       product.low_stock_threshold === null ? '' : String(product.low_stock_threshold),
     priceIncludesGst: product.priceIncludesGst,
+    purchasePrice: product.purchase_price === null ? '' : String(product.purchase_price),
   };
 }
 
