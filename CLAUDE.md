@@ -149,10 +149,34 @@ confirmation of the shop's existing signage/branding.
   an HSN code are flagged in the Inventory list, AND the warning must surface
   again at bill-generation time in Phase 4 — an incomplete HSN reaches the
   customer's invoice, so it cannot only be flagged where stock is managed.
+- **Invoice numbers are reserved inside the bill's own transaction.** An invoice
+  number is a legal record: it must never be reused, and a number must never be
+  handed out for a bill that then fails to save. `createBill` takes either an
+  explicit `invoice_number` or a `generateInvoiceNumber` callback, and calls the
+  callback with the transaction handle — so the counter and the bill commit or
+  roll back together. Pass `invoiceNumberGenerator()` from `lib/invoiceNumber.ts`.
+  It is injected rather than imported by `db/bills.ts` to avoid an import cycle
+  and to keep the numbering rules in one module.
+- **The invoice format must carry a token matching its reset period.** Validation
+  rejects `{YYYY}` with a financial-year reset, because the sequence restarts on
+  1 April while `{YYYY}` only changes on 1 January — two bills in the same
+  calendar year but different financial years would both render `MPE/2026/0001`.
+  Hence the placeholder default is `MPE/{FY}/{SEQ}`, not `MPE/{YYYY}/{SEQ}`.
+- **Invoice counters are stored one row per period** (`invoice_seq:fy-2026-27` in
+  `app_settings`), not a single counter plus a "current period" marker, so a bill
+  backdated across 1 April resumes the closed year instead of restarting it.
+- **`invoiceNumberToFileName()` lives in `lib/invoiceNumber.ts`**, not in the PDF
+  module. Indian invoice numbers contain slashes, which are path separators — the
+  mapping to a safe filename must have exactly one definition. Use it in T4.2.
 
 ## Open decisions (from the planning docs)
 
-- Exact registered business name, GSTIN, address, and invoice numbering convention
+- Exact registered business name, GSTIN, and address
+- Invoice numbering: the real format, whether the sequence resets each financial
+  year, and the starting number (raise it if a paper bill book is part-used, or
+  the app will reissue numbers the customer already holds). Defaults today are
+  `MPE/{FY}/{SEQ}`, financial-year reset, starting at 1 — all `PLACEHOLDER` in
+  `constants/business.ts`. The owner is confirming these with the shop before T3.6.
 - Bluetooth thermal printer model (blocks T4.5 / T4.7)
 - Low-stock threshold: global default or per-product
 - Whether to import an existing inventory spreadsheet at launch

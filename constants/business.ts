@@ -13,6 +13,9 @@
  * persisted locally; this file then only supplies the first-run defaults.
  */
 
+// Type-only import, erased at compile time — no runtime cycle with lib/invoiceNumber.
+import type { InvoiceResetPolicy } from '@/lib/invoiceNumber';
+
 export type BusinessDetails = {
   name: string;
   gstin: string;
@@ -28,8 +31,11 @@ export type BusinessDetails = {
   bankAccountNumber: string;
   bankIfsc: string;
   logoPath: string | null;
-  /** Invoice number format. {YYYY} = year, {SEQ} = zero-padded running number. */
+  /** Invoice number format. See INVOICE_FORMAT_TOKENS in `lib/invoiceNumber.ts`. */
   invoiceNumberFormat: string;
+  /** When the running number restarts. Must match the format's period token. */
+  invoiceResetPolicy: InvoiceResetPolicy;
+  /** The number the first bill gets — set higher to continue a paper bill book. */
   invoiceStartNumber: number;
 };
 
@@ -48,8 +54,12 @@ export const BUSINESS_DETAILS: BusinessDetails = {
   bankAccountNumber: 'PLACEHOLDER_ACCOUNT_NUMBER', // PLACEHOLDER — optional
   bankIfsc: 'PLACEHOLDER_IFSC', // PLACEHOLDER — optional
   logoPath: null, // PLACEHOLDER — optional shop logo
-  invoiceNumberFormat: 'MPE/{YYYY}/{SEQ}', // PLACEHOLDER — confirm convention
-  invoiceStartNumber: 1, // PLACEHOLDER — confirm starting number
+  // PLACEHOLDER — confirm the convention. {FY} rather than {YYYY} because the
+  // number restarts on 1 April: a calendar year token would let two bills in the
+  // same calendar year but different financial years render the same number.
+  invoiceNumberFormat: 'MPE/{FY}/{SEQ}', // PLACEHOLDER — e.g. MPE/2026-27/0001
+  invoiceResetPolicy: 'financial-year', // PLACEHOLDER — confirm; Indian convention
+  invoiceStartNumber: 1, // PLACEHOLDER — confirm; raise to continue a paper series
 };
 
 /** True while any required business detail is still a placeholder. */

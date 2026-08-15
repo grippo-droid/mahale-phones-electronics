@@ -30,7 +30,21 @@ export type NewBillItem = {
 };
 
 export type NewBill = {
-  invoice_number: string;
+  /**
+   * Supply a number directly, or supply `generateInvoiceNumber` instead and let
+   * one be reserved inside the transaction. Exactly one of the two is required.
+   */
+  invoice_number?: string;
+  /**
+   * Reserves the invoice number using the transaction handle that writes this
+   * bill, so a bill that fails to save cannot consume a number and two bills
+   * cannot be handed the same one.
+   *
+   * Pass `invoiceNumberGenerator()` from `lib/invoiceNumber.ts`. It is injected
+   * rather than imported here so that the numbering rules stay in one module and
+   * this one keeps storing only what it is given.
+   */
+  generateInvoiceNumber?: (txn: SQLiteDatabase) => Promise<string>;
   /** Defaults to now. Stored as an ISO 8601 UTC string. */
   date?: Date;
   customer_name: string;
@@ -83,13 +97,19 @@ export async function createBill(
   let billId = -1;
 
   await db.withExclusiveTransactionAsync(async (txn) => {
+    // Reserved in here on purpose: the counter advances and the bill is written
+    // in the same unit of work, so neither can happen without the other.
+    const invoiceNumber = input.invoice_number
+      ? input.invoice_number.trim()
+      : await input.generateInvoiceNumber!(txn);
+
     const result = await txn.runAsync(
       `INSERT INTO bills
          (invoice_number, date, customer_name, customer_phone, customer_address,
           customer_gstin, customer_state, subtotal, cgst_total, sgst_total,
           igst_total, grand_total, pdf_path, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      input.invoice_number.trim(),
+      invoiceNumber,
       date,
       input.customer_name.trim(),
       input.customer_phone.trim(),
@@ -246,6 +266,23 @@ export async function getSalesSummary(
   return { billCount: row?.bill_count ?? 0, total: row?.total ?? 0 };
 }
 
+/**
+ * Whether a number has already been issued. Cheaper than fetching the bill, and
+ * used by `lib/invoiceNumber.ts` on every generated number as a last line of
+ * defence against reuse — the UNIQUE constraint would catch it, but only by
+ * failing the sale at the counter.
+ */
+export async function invoiceNumberExists(
+  invoiceNumber: string,
+  db: SQLiteDatabase = getDatabase()
+): Promise<boolean> {
+  const row = await db.getFirstAsync<{ found: number }>(
+    'SELECT 1 AS found FROM bills WHERE invoice_number = ? LIMIT 1',
+    invoiceNumber
+  );
+  return row !== null;
+}
+
 export async function countBills(db: SQLiteDatabase = getDatabase()): Promise<number> {
   const row = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) AS count FROM bills');
   return row?.count ?? 0;
@@ -273,7 +310,17 @@ export async function setBillPdfPath(
 // ---------------------------------------------------------------------------
 
 function validateNewBill(input: NewBill): void {
-  if (!input.invoice_number?.trim()) throw new Error('Invoice number is required.');
+  const hasNumber = Boolean(input.invoice_number?.trim());
+  const hasGenerator = typeof input.generateInvoiceNumber === 'function';
+
+  if (!hasNumber && !hasGenerator) {
+    throw new Error('A bill needs an invoice number, or a way to generate one.');
+  }
+  if (hasNumber && hasGenerator) {
+    // Silently preferring one would make it unclear which number was issued.
+    throw new Error('Give either an invoice number or a generator, not both.');
+  }
+
   if (!input.customer_name?.trim()) throw new Error('Customer name is required.');
   if (!input.customer_phone?.trim()) throw new Error('Customer phone number is required.');
   if (!input.customer_state?.trim()) {
