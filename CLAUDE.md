@@ -117,6 +117,24 @@ until it is filled in.
 The brand colour in `constants/theme.ts` is also a placeholder, pending
 confirmation of the shop's existing signage/branding.
 
+## Decisions already made (do not re-litigate)
+
+- **Categories** are a fixed dropdown of six: CCTV, RO, Tube Light, Bulb,
+  Wiring & Electrical, Other. Free-text entry was rejected — it lets "cctv" and
+  "CCTV" become two categories. The Inventory *filter* additionally shows any
+  category actually present in the data, so products in a retired category never
+  become unreachable.
+- **Brand colour** is `#1565C0`, confirmed and final.
+- **Low-stock threshold** is nullable per product, falling back to a global
+  default held in `app_settings`.
+- **Overselling is allowed.** The repository lets stock go negative; the UI warns
+  at billing time. Negative stock is its own visual state ("Oversold"), distinct
+  from out-of-stock, because it means the recorded count is wrong.
+- **HSN code is optional at save time, with a visible warning.** Products missing
+  an HSN code are flagged in the Inventory list, AND the warning must surface
+  again at bill-generation time in Phase 4 — an incomplete HSN reaches the
+  customer's invoice, so it cannot only be flagged where stock is managed.
+
 ## Open decisions (from the planning docs)
 
 - Exact registered business name, GSTIN, address, and invoice numbering convention

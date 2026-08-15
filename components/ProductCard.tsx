@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -40,7 +41,17 @@ function ProductCard({ product, onPress }: Props) {
           {product.brand ? <Text style={styles.brand}>{product.brand}</Text> : null}
         </View>
 
-        <LowStockBadge status={product.stockStatus} stockQty={product.stock_qty} />
+        <View style={styles.badgeRow}>
+          <LowStockBadge status={product.stockStatus} stockQty={product.stock_qty} />
+          {/* HSN is optional to save but required on a GST invoice, so the gap is
+              surfaced here and again at bill generation (T4.2). */}
+          {!product.hsn_code ? (
+            <View style={styles.hsnWarning}>
+              <Ionicons name="warning" size={11} color={Colors.lowStock} />
+              <Text style={styles.hsnWarningText}>No HSN</Text>
+            </View>
+          ) : null}
+        </View>
       </View>
 
       <View style={styles.side}>
@@ -82,6 +93,18 @@ const styles = StyleSheet.create({
   },
   categoryText: { fontSize: FontSizes.small - 2, color: Colors.textMuted, fontWeight: '600' },
   brand: { fontSize: FontSizes.small - 1, color: Colors.textMuted },
+  badgeRow: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexWrap: 'wrap' },
+  hsnWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.lowStock,
+    paddingVertical: 2,
+    paddingHorizontal: Spacing.sm,
+  },
+  hsnWarningText: { fontSize: FontSizes.small - 3, color: Colors.lowStock, fontWeight: '700' },
   side: { alignItems: 'flex-end', gap: 2 },
   price: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text },
   stock: { fontSize: FontSizes.small, fontWeight: '700' },
