@@ -28,6 +28,8 @@ export type Product = ProductRow & {
   /** The product's own threshold, or the global default when it has none. */
   effectiveLowStockThreshold: number;
   stockStatus: StockStatus;
+  /** `price_includes_gst` as a boolean — SQLite stores it as 0/1. */
+  priceIncludesGst: boolean;
 };
 
 export function deriveStockStatus(stockQty: number, effectiveThreshold: number): StockStatus {
@@ -43,6 +45,7 @@ function decorate(row: ProductRow, globalThreshold: number): Product {
     ...row,
     effectiveLowStockThreshold,
     stockStatus: deriveStockStatus(row.stock_qty, effectiveLowStockThreshold),
+    priceIncludesGst: row.price_includes_gst === 1,
   };
 }
 
@@ -61,6 +64,8 @@ export type NewProduct = {
   model_number?: string | null;
   /** NULL/omitted means "use the global default". */
   low_stock_threshold?: number | null;
+  /** True when `unit_price` already contains GST. Defaults to false. */
+  price_includes_gst?: boolean;
 };
 
 export type ProductUpdate = Partial<NewProduct>;
@@ -177,8 +182,8 @@ export async function createProduct(
   const result = await db.runAsync(
     `INSERT INTO products
        (name, category, stock_qty, unit_price, gst_rate, hsn_code, brand,
-        model_number, low_stock_threshold, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        model_number, low_stock_threshold, price_includes_gst, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     input.name.trim(),
     input.category,
     input.stock_qty,
@@ -188,6 +193,7 @@ export async function createProduct(
     input.brand?.trim() || null,
     input.model_number?.trim() || null,
     input.low_stock_threshold ?? null,
+    input.price_includes_gst ? 1 : 0,
     now,
     now
   );
@@ -222,6 +228,9 @@ export async function updateProduct(
   if (patch.model_number !== undefined) assign('model_number', patch.model_number?.trim() || null);
   if (patch.low_stock_threshold !== undefined) {
     assign('low_stock_threshold', patch.low_stock_threshold ?? null);
+  }
+  if (patch.price_includes_gst !== undefined) {
+    assign('price_includes_gst', patch.price_includes_gst ? 1 : 0);
   }
 
   if (columns.length === 0) {

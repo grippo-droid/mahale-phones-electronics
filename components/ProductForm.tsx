@@ -15,6 +15,8 @@ import {
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import type { NewProduct } from '@/db/products';
 import { GST_RATE_SLABS, PRODUCT_CATEGORIES } from '@/db/schema';
+import { formatRupees } from '@/lib/format';
+import { splitPrice } from '@/lib/gst';
 
 /**
  * Shared add/edit product form (T2.3, T2.4).
@@ -38,6 +40,7 @@ export type ProductFormValues = {
   brand: string;
   modelNumber: string;
   lowStockThreshold: string;
+  priceIncludesGst: boolean;
 };
 
 export const EMPTY_PRODUCT_FORM: ProductFormValues = {
@@ -50,6 +53,7 @@ export const EMPTY_PRODUCT_FORM: ProductFormValues = {
   brand: '',
   modelNumber: '',
   lowStockThreshold: '',
+  priceIncludesGst: false,
 };
 
 type FieldErrors = Partial<Record<keyof ProductFormValues, string>>;
@@ -185,6 +189,35 @@ export default function ProductForm({
           </View>
         </Field>
 
+        <Field label="Does the price above include GST?" required>
+          <View style={styles.chipWrap}>
+            <Pressable
+              onPress={() => set('priceIncludesGst', false)}
+              style={[styles.chip, !values.priceIncludesGst && styles.chipActive]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: !values.priceIncludesGst }}>
+              <Text style={[styles.chipText, !values.priceIncludesGst && styles.chipTextActive]}>
+                No — add GST on top
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => set('priceIncludesGst', true)}
+              style={[styles.chip, values.priceIncludesGst && styles.chipActive]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: values.priceIncludesGst }}>
+              <Text style={[styles.chipText, values.priceIncludesGst && styles.chipTextActive]}>
+                Yes — price is final
+              </Text>
+            </Pressable>
+          </View>
+        </Field>
+
+        <PricePreview
+          unitPrice={values.unitPrice}
+          gstRate={values.gstRate}
+          priceIncludesGst={values.priceIncludesGst}
+        />
+
         <Field label="HSN code" error={errors.hsnCode} hint="Optional, but needed on GST bills">
           <TextInput
             style={[styles.input, errors.hsnCode && styles.inputError]}
@@ -260,6 +293,87 @@ export default function ProductForm({
         {footer}
       </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+/**
+ * Live breakdown of the entered price, shown in both directions regardless of
+ * which basis is selected. Whoever enters a price can see the pre-tax value and
+ * the figure the customer actually hands over before saving, so a product
+ * entered on the wrong basis is caught here rather than on a printed bill.
+ */
+function PricePreview({
+  unitPrice,
+  gstRate,
+  priceIncludesGst,
+}: {
+  unitPrice: string;
+  gstRate: number;
+  priceIncludesGst: boolean;
+}) {
+  const parsed = Number(unitPrice.trim());
+  const hasPrice = unitPrice.trim() !== '' && Number.isFinite(parsed) && parsed >= 0;
+
+  if (!hasPrice) {
+    return (
+      <View style={styles.preview}>
+        <Text style={styles.previewEmpty}>Enter a price to see the GST breakdown.</Text>
+      </View>
+    );
+  }
+
+  const { exclusive, inclusive, taxPerUnit } = splitPrice(parsed, gstRate, priceIncludesGst);
+
+  return (
+    <View style={styles.preview}>
+      <PreviewRow
+        label="Base price (before GST)"
+        value={formatRupees(exclusive)}
+        highlight={!priceIncludesGst}
+      />
+      <PreviewRow label={`GST at ${gstRate}%`} value={formatRupees(taxPerUnit)} />
+      <View style={styles.previewDivider} />
+      <PreviewRow
+        label="Customer pays"
+        value={formatRupees(inclusive)}
+        highlight={priceIncludesGst}
+        strong
+      />
+      <Text style={styles.previewNote}>
+        {priceIncludesGst
+          ? 'You entered the final price. GST is worked backwards out of it.'
+          : 'You entered the base price. GST is added on top.'}
+      </Text>
+    </View>
+  );
+}
+
+function PreviewRow({
+  label,
+  value,
+  highlight,
+  strong,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  strong?: boolean;
+}) {
+  return (
+    <View style={styles.previewRow}>
+      <Text style={[styles.previewLabel, highlight && styles.previewHighlightText]}>
+        {label}
+        {highlight ? ' (entered)' : ''}
+      </Text>
+      <Text
+        style={[
+          styles.previewValue,
+          strong && styles.previewValueStrong,
+          highlight && styles.previewHighlightText,
+        ]}>
+        {value}
+      </Text>
+    </View>
   );
 }
 
@@ -345,6 +459,7 @@ export function validate(values: ProductFormValues): {
       brand: values.brand.trim() || null,
       model_number: values.modelNumber.trim() || null,
       low_stock_threshold: lowStockThreshold,
+      price_includes_gst: values.priceIncludesGst,
     },
     fieldErrors: {},
   };
@@ -396,6 +511,23 @@ const styles = StyleSheet.create({
     borderColor: Colors.lowStock,
   },
   warningText: { flex: 1, fontSize: FontSizes.small, color: Colors.text, lineHeight: 18 },
+  preview: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    backgroundColor: Colors.surface,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    gap: Spacing.xs,
+  },
+  previewEmpty: { fontSize: FontSizes.small, color: Colors.textMuted, textAlign: 'center' },
+  previewRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: Spacing.sm },
+  previewLabel: { flex: 1, fontSize: FontSizes.small, color: Colors.textMuted },
+  previewValue: { fontSize: FontSizes.body, color: Colors.text, fontWeight: '600' },
+  previewValueStrong: { fontSize: FontSizes.title, fontWeight: '700' },
+  previewHighlightText: { color: Colors.brand },
+  previewDivider: { height: 1, backgroundColor: Colors.border, marginVertical: Spacing.xs },
+  previewNote: { fontSize: FontSizes.small - 1, color: Colors.textMuted, marginTop: Spacing.xs },
   saveButton: {
     backgroundColor: Colors.brand,
     borderRadius: 8,

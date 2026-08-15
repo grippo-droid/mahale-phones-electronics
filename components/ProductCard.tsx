@@ -59,7 +59,9 @@ function ProductCard({ product, onPress }: Props) {
         <Text style={[styles.stock, { color: statusColour }]}>
           {formatQuantity(product.stock_qty)} in stock
         </Text>
-        <Text style={styles.gst}>GST {product.gst_rate}%</Text>
+        <Text style={styles.gst}>
+          GST {product.gst_rate}%{product.priceIncludesGst ? ' incl.' : ''}
+        </Text>
       </View>
     </Pressable>
   );

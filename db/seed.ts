@@ -1,6 +1,8 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { createBill } from './bills';
+import { calculateLine, round2, supplyTypeFor } from '@/lib/gst';
+
+import { createBill, type NewBillItem } from './bills';
 import { getDatabase } from './init';
 import { countProducts, createProduct, type NewProduct, type Product } from './products';
 
@@ -46,21 +48,27 @@ export const SAMPLE_PRODUCTS: NewProduct[] = [
   { name: 'RO Sediment Filter 10 inch', category: 'RO', brand: 'Generic',
     stock_qty: 40, unit_price: 120, gst_rate: 18, hsn_code: '84219900' },
 
-  // --- Tube lights ---
+  // --- Tube lights (marked MRP — the customer pays the price on the box) ---
   { name: 'Philips LED Batten 20W', category: 'Tube Light', brand: 'Philips',
-    stock_qty: 30, unit_price: 420, gst_rate: 12, hsn_code: '94054900' },
+    stock_qty: 30, unit_price: 420, gst_rate: 12, hsn_code: '94054900',
+    price_includes_gst: true },
   { name: 'Havells LED Tube Light 18W', category: 'Tube Light', brand: 'Havells',
-    stock_qty: 18, unit_price: 380, gst_rate: 12, hsn_code: '94054900' },
+    stock_qty: 18, unit_price: 380, gst_rate: 12, hsn_code: '94054900',
+    price_includes_gst: true },
   { name: 'Syska LED Batten 22W', category: 'Tube Light', brand: 'Syska',
-    stock_qty: 4, unit_price: 350, gst_rate: 12, hsn_code: '94054900' },
+    stock_qty: 4, unit_price: 350, gst_rate: 12, hsn_code: '94054900',
+    price_includes_gst: true },
 
-  // --- Bulbs ---
+  // --- Bulbs (marked MRP) ---
   { name: 'Philips LED Bulb 9W', category: 'Bulb', brand: 'Philips',
-    stock_qty: 60, unit_price: 90, gst_rate: 12, hsn_code: '85395000' },
+    stock_qty: 60, unit_price: 90, gst_rate: 12, hsn_code: '85395000',
+    price_includes_gst: true },
   { name: 'Wipro LED Bulb 12W', category: 'Bulb', brand: 'Wipro',
-    stock_qty: 45, unit_price: 130, gst_rate: 12, hsn_code: '85395000' },
+    stock_qty: 45, unit_price: 130, gst_rate: 12, hsn_code: '85395000',
+    price_includes_gst: true },
   { name: 'Orient LED Bulb 5W', category: 'Bulb', brand: 'Orient',
-    stock_qty: 0, unit_price: 70, gst_rate: 12, hsn_code: '85395000' },
+    stock_qty: 0, unit_price: 70, gst_rate: 12, hsn_code: '85395000',
+    price_includes_gst: true },
 
   // --- Wiring & Electrical ---
   { name: 'Copper Wire 1.5mm (90m roll)', category: 'Wiring & Electrical', brand: 'Finolex',
@@ -165,40 +173,41 @@ export async function clearAllData(db: SQLiteDatabase = getDatabase()): Promise<
 }
 
 // ---------------------------------------------------------------------------
-// Provisional GST maths for sample data only.
-//
-// `lib/gst.ts` (T3.1) is the real implementation and will replace this. It is
-// duplicated here deliberately rather than imported, so the seed data does not
-// become a reason to build T3.1 early or a constraint on how it is designed.
+// Sample bill maths — uses lib/gst.ts, the same module that calculates real
+// bills, so the seeded figures are a genuine check on it rather than a
+// second implementation that could drift.
 // ---------------------------------------------------------------------------
 
-function buildSampleItem(
-  product: { id: number; name: string; hsn_code: string | null; unit_price: number; gst_rate: number },
-  qty: number,
-  customerState: string
-) {
-  const taxable = round2(product.unit_price * qty);
-  const interState = customerState !== SAMPLE_BUSINESS_STATE;
-  const totalTax = round2((taxable * product.gst_rate) / 100);
-  const half = round2(totalTax / 2);
+function buildSampleItem(product: Product, qty: number, customerState: string): NewBillItem {
+  const supplyType = supplyTypeFor(SAMPLE_BUSINESS_STATE, customerState);
+  const line = calculateLine(
+    {
+      unitPrice: product.unit_price,
+      qty,
+      gstRate: product.gst_rate,
+      priceIncludesGst: product.priceIncludesGst,
+    },
+    supplyType
+  );
 
   return {
     product_id: product.id,
     product_name_snapshot: product.name,
     hsn_code_snapshot: product.hsn_code,
     qty,
-    unit_price_snapshot: product.unit_price,
+    // The pre-tax rate, which is what a GST invoice must show per unit.
+    unit_price_snapshot: line.unitPriceExclusive,
     gst_rate_snapshot: product.gst_rate,
-    taxable_value: taxable,
-    cgst_amount: interState ? 0 : half,
-    sgst_amount: interState ? 0 : half,
-    igst_amount: interState ? totalTax : 0,
-    line_total: round2(taxable + (interState ? totalTax : half * 2)),
+    taxable_value: line.taxableValue,
+    cgst_amount: line.cgstAmount,
+    sgst_amount: line.sgstAmount,
+    igst_amount: line.igstAmount,
+    line_total: line.lineTotal,
   };
 }
 
-function totalsFor(items: ReturnType<typeof buildSampleItem>[]) {
-  const sum = (pick: (item: (typeof items)[number]) => number) =>
+function totalsFor(items: NewBillItem[]) {
+  const sum = (pick: (item: NewBillItem) => number) =>
     round2(items.reduce((total, item) => total + pick(item), 0));
 
   return {
@@ -208,10 +217,6 @@ function totalsFor(items: ReturnType<typeof buildSampleItem>[]) {
     igst_total: sum((item) => item.igst_amount),
     grand_total: sum((item) => item.line_total),
   };
-}
-
-function round2(value: number): number {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function daysAgo(days: number): Date {

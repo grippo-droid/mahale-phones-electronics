@@ -54,6 +54,12 @@ export type ProductRow = {
   model_number: string | null;
   /** NULL means "fall back to the global default in app_settings". */
   low_stock_threshold: number | null;
+  /**
+   * SQLite has no boolean: 1 = `unit_price` already contains GST (the customer
+   * pays exactly that), 0 = GST is added on top. Set per product because a shop
+   * quotes MRP-inclusive prices on some lines and pre-tax prices on others.
+   */
+  price_includes_gst: number;
   created_at: string;
   updated_at: string;
 };
@@ -181,10 +187,22 @@ const migration001: Migration = {
   },
 };
 
+const migration002: Migration = {
+  version: 2,
+  name: 'product_price_includes_gst',
+  up: async (db) => {
+    // Defaults to 0 (GST added on top) so every product that existed before this
+    // column is treated exactly as it was calculated previously.
+    await db.execAsync(`
+      ALTER TABLE products ADD COLUMN price_includes_gst INTEGER NOT NULL DEFAULT 0;
+    `);
+  },
+};
+
 /**
  * Every migration ever shipped, in order. Append only.
  */
-export const MIGRATIONS: Migration[] = [migration001];
+export const MIGRATIONS: Migration[] = [migration001, migration002];
 
 /** The schema version the current build of the app expects. */
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce(

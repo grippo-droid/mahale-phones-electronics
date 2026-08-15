@@ -150,6 +150,7 @@ function toFormValues(product: Product): ProductFormValues {
     // Blank means "use the shop-wide default", which is exactly what NULL means.
     lowStockThreshold:
       product.low_stock_threshold === null ? '' : String(product.low_stock_threshold),
+    priceIncludesGst: product.priceIncludesGst,
   };
 }
 
