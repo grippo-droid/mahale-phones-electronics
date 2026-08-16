@@ -232,6 +232,19 @@ confirmation of the shop's existing signage/branding.
 - **Both billing steps are reachable at any time.** The step switch does not
   gate step 2 behind step 1 — a customer often gives their name before the last
   item is on the bill, and forcing an order onto that means going back and forth.
+- **The GST summary panel lives on the customer step, not the items step.** The
+  CGST/SGST-vs-IGST split is decided by the customer's state, so picking the
+  state and watching the split appear belong on one screen. The panel shows the
+  rate-wise table only once the supply type is real — a rate-wise table is the
+  most authoritative-looking thing on the screen and the worst thing to render
+  from a guess. Before that it shows the taxable value and an explicitly
+  approximate grand total.
+- **The missing-HSN warning surfaces on the summary panel.** This closes the
+  Phase 2 carry-over: an absent HSN is an inventory annoyance on the Inventory
+  tab, but on the summary panel it is about to be printed on a customer's GST
+  invoice. It is read from the cart line's HSN **snapshot**, not re-queried from
+  the product, because the snapshot is what `bill_items` stores and therefore
+  what actually reaches the invoice. It warns; it never blocks.
 
 ## Open decisions (from the planning docs)
 

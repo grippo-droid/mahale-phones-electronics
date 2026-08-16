@@ -17,6 +17,7 @@ import {
 
 import BillItemRow from '@/components/BillItemRow';
 import CustomerDetailsForm from '@/components/CustomerDetailsForm';
+import GstSummary from '@/components/GstSummary';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { getProductsByIds, listProducts, type Product } from '@/db/products';
 import { resolveSupplyType, validateCustomer, type CustomerField } from '@/lib/customer';
@@ -191,6 +192,19 @@ export default function BillingScreen() {
     [lines, supplyType]
   );
 
+  /**
+   * Items on the bill with no HSN code. Read from the cart line's snapshot
+   * rather than re-queried, because the snapshot is what `bill_items` will store
+   * and therefore what actually reaches the invoice.
+   */
+  const missingHsnNames = useMemo(
+    () =>
+      lines
+        .filter((line) => !line.hsnCode || line.hsnCode.trim().length === 0)
+        .map((line) => line.name),
+    [lines]
+  );
+
   const oversoldCount = useMemo(
     () =>
       lines.filter((line) => {
@@ -279,9 +293,14 @@ export default function BillingScreen() {
             touched={touched}
             onBlurField={handleBlurField}
           />
-          <Text style={styles.nextStepNote}>
-            The GST breakdown and “Generate Bill” come next.
-          </Text>
+
+          <GstSummary
+            lines={lines}
+            supplyType={supplyType}
+            missingHsnNames={missingHsnNames}
+          />
+
+          <Text style={styles.nextStepNote}>“Generate Bill” comes next.</Text>
         </ScrollView>
       ) : showResults ? (
         <SearchResults
