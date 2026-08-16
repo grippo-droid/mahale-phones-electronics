@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,10 +19,13 @@ import BillItemRow from '@/components/BillItemRow';
 import CustomerDetailsForm from '@/components/CustomerDetailsForm';
 import GstSummary from '@/components/GstSummary';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
+import { createBill } from '@/db/bills';
 import { getProductsByIds, listProducts, type Product } from '@/db/products';
+import { buildNewBill, findDeletedProducts, findOversells } from '@/lib/billDraft';
 import { resolveSupplyType, validateCustomer, type CustomerField } from '@/lib/customer';
 import { formatRupees } from '@/lib/format';
 import { calculateBill, type SupplyType } from '@/lib/gst';
+import { invoiceNumberGenerator } from '@/lib/invoiceNumber';
 import {
   selectCustomer,
   selectItemCount,
@@ -63,6 +66,8 @@ type Step = 'items' | 'customer';
 export default function BillingScreen() {
   const [step, setStep] = useState<Step>('items');
   const [touched, setTouched] = useState<Partial<Record<CustomerField, boolean>>>({});
+  const [showAllErrors, setShowAllErrors] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [results, setResults] = useState<Product[]>([]);
@@ -247,6 +252,106 @@ export default function BillingScreen() {
 
   const customerValidation = useMemo(() => validateCustomer(customer), [customer]);
 
+  // -------------------------------------------------------------------------
+  // Generate Bill (T3.6)
+  // -------------------------------------------------------------------------
+
+  const writeBill = useCallback(async () => {
+    // Re-resolved here rather than trusted from render: this is the value that
+    // decides the tax heads on a permanent record.
+    const type = resolveSupplyType(customer.state);
+    if (!type) {
+      setError('The customer’s state is needed before a bill can be generated.');
+      return;
+    }
+
+    setGenerating(true);
+    setError(null);
+
+    try {
+      const draft = buildNewBill({ lines, customer, supplyType: type });
+      const bill = await createBill({
+        ...draft,
+        // Reserved inside the write transaction, so a bill that fails to save
+        // cannot consume a number — see lib/invoiceNumber.ts.
+        generateInvoiceNumber: invoiceNumberGenerator(),
+      });
+
+      // Only cleared once the bill is safely written. If createBill throws, the
+      // cart is still there and the sale can be retried rather than retyped.
+      clear();
+      setTouched({});
+      setStep('items');
+      setSearchInput('');
+
+      router.push({ pathname: '/bill/[id]', params: { id: String(bill.id) } });
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? `The bill could not be saved: ${err.message}`
+          : 'The bill could not be saved.'
+      );
+    } finally {
+      setGenerating(false);
+    }
+  }, [customer, lines, clear]);
+
+  const handleGenerate = useCallback(() => {
+    // Force every outstanding error into view rather than only the touched ones,
+    // so pressing the button on a half-filled form explains itself.
+    if (!customerValidation.canGenerate) {
+      setShowAllErrors(true);
+      setStep('customer');
+      return;
+    }
+
+    const deleted = findDeletedProducts(lines, stockById);
+    if (deleted.length > 0) {
+      Alert.alert(
+        deleted.length === 1 ? 'A product was deleted' : 'Some products were deleted',
+        `${deleted.join(', ')} ${deleted.length === 1 ? 'is' : 'are'} no longer in inventory. ` +
+          'The bill can still be generated, but there is no stock to reduce. Remove the ' +
+          'line instead if it was added by mistake.',
+        [
+          { text: 'Go back', style: 'cancel' },
+          { text: 'Generate anyway', style: 'destructive', onPress: () => confirmOversell() },
+        ]
+      );
+      return;
+    }
+
+    confirmOversell();
+
+    /**
+     * One consolidated confirmation, at the end, rather than a dialog per line.
+     * The per-line warnings have been on screen the whole time and are a
+     * statement of fact; this is the single point where the count is actually
+     * changed, so it is the one place a decision is being made. A dialog per
+     * oversold row would train the user to dismiss dialogs unread.
+     */
+    function confirmOversell() {
+      const oversells = findOversells(lines, stockById);
+      if (oversells.length === 0) {
+        writeBill();
+        return;
+      }
+
+      const detail = oversells
+        .map((o) => `• ${o.name}: ${o.qty} billed, ${o.stockQty} in stock → ${-o.shortfall}`)
+        .join('\n');
+
+      Alert.alert(
+        'Stock will go negative',
+        `${detail}\n\nThis is allowed — it usually means the recorded count is behind. ` +
+          'The bill will be generated and the counts corrected on the Inventory tab.',
+        [
+          { text: 'Go back', style: 'cancel' },
+          { text: 'Generate bill', onPress: () => writeBill() },
+        ]
+      );
+    }
+  }, [customerValidation.canGenerate, lines, stockById, writeBill]);
+
   const showResults = step === 'items' && hasSearchTerm;
 
   return (
@@ -292,6 +397,7 @@ export default function BillingScreen() {
             onChangeField={setCustomerField}
             touched={touched}
             onBlurField={handleBlurField}
+            showAllErrors={showAllErrors}
           />
 
           <GstSummary
@@ -299,8 +405,6 @@ export default function BillingScreen() {
             supplyType={supplyType}
             missingHsnNames={missingHsnNames}
           />
-
-          <Text style={styles.nextStepNote}>“Generate Bill” comes next.</Text>
         </ScrollView>
       ) : showResults ? (
         <SearchResults
@@ -363,6 +467,32 @@ export default function BillingScreen() {
           accessibilityLabel="Continue to customer details">
           <Text style={styles.primaryButtonText}>Next: customer details</Text>
           <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
+        </Pressable>
+      ) : null}
+
+      {/* The button stays enabled on an incomplete form and explains what is
+          missing when pressed. A greyed-out button with no reason given is the
+          single most confusing thing to hand a first-time user. */}
+      {step === 'customer' && lines.length > 0 ? (
+        <Pressable
+          style={({ pressed }) => [
+            styles.primaryButton,
+            pressed && styles.primaryButtonPressed,
+            generating && styles.primaryButtonBusy,
+          ]}
+          onPress={handleGenerate}
+          disabled={generating}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: generating }}
+          accessibilityLabel="Generate the bill">
+          {generating ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Ionicons name="receipt" size={20} color="#FFFFFF" />
+          )}
+          <Text style={styles.primaryButtonText}>
+            {generating ? 'Saving…' : 'Generate bill'}
+          </Text>
         </Pressable>
       ) : null}
 
@@ -589,6 +719,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.brand,
   },
   primaryButtonPressed: { backgroundColor: Colors.brandDark },
+  primaryButtonBusy: { opacity: 0.7 },
   primaryButtonText: { color: '#FFFFFF', fontSize: FontSizes.body, fontWeight: '700' },
 
   searchBar: {

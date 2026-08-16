@@ -150,8 +150,10 @@ confirmation of the shop's existing signage/branding.
   visible "Round Off" line on the invoice. Needed because reverse-calculating
   tax out of an MRP lands up to a paisa away from the marked price — ten bulbs
   marked ₹90 compute to ₹899.99. Storage is `bills.round_off` (migration 004,
-  lands with T3.6); the calculation is
-  `calculateBill(..., { roundToNearestRupee: true })`.
+  shipped with T3.6); the calculation is
+  `calculateBill(..., { roundToNearestRupee: true })`. It is stored rather than
+  recomputed on read because it is a printed line on a legal document: the bill
+  must reproduce years later even if the rounding rule ever changes.
 - **`products.purchase_price` is strictly internal** (migration 003). It exists
   so the owner can judge a selling price against what he paid. It must NEVER
   appear on a bill, invoice PDF, thermal print, or anything shared out of the
@@ -239,6 +241,25 @@ confirmation of the shop's existing signage/branding.
   most authoritative-looking thing on the screen and the worst thing to render
   from a guess. Before that it shows the taxable value and an explicitly
   approximate grand total.
+- **`lib/billDraft.ts` is the only thing that turns a cart into a bill.** It is
+  a pure function, so what gets written is checkable without a screen or a
+  database, and both the totals shown and the totals stored come from the same
+  `calculateBill` call. A bill whose line items do not add up to its own total
+  cannot be defended to a customer or an inspector, and the way that happens is
+  the screen totalling one way and the repository another.
+- **Oversell gets exactly one confirmation, at "Generate Bill".** The per-line
+  warnings are statements of fact and stay inline (see above). The button is the
+  single point where recorded stock actually changes, so it is the one place a
+  decision is being made — one consolidated dialog listing every affected line,
+  never one dialog per row. A deleted product gets its own separate prompt,
+  because it is a different problem: there is no stock to reduce at all.
+- **The cart is cleared only after `createBill` returns.** If the write throws,
+  the cart is still intact and the sale can be retried rather than retyped at a
+  counter with a customer waiting.
+- **The "Generate Bill" button is never greyed out.** Pressed on an incomplete
+  form it switches to the customer step and reveals every outstanding error at
+  once. A disabled button that does not say why is the most confusing thing to
+  hand a first-time user.
 - **The missing-HSN warning surfaces on the summary panel.** This closes the
   Phase 2 carry-over: an absent HSN is an inventory annoyance on the Inventory
   tab, but on the summary panel it is about to be printed on a customer's GST

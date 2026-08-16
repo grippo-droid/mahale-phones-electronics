@@ -86,6 +86,12 @@ export type BillRow = {
   cgst_total: number;
   sgst_total: number;
   igst_total: number;
+  /**
+   * The adjustment that took the exact total to a whole rupee. Stored rather
+   * than recomputed because it is a printed line on the invoice: the bill must
+   * be reproducible years later even if the rounding rule ever changes.
+   */
+  round_off: number;
   grand_total: number;
   pdf_path: string | null;
   created_at: string;
@@ -220,10 +226,27 @@ const migration003: Migration = {
   },
 };
 
+const migration004: Migration = {
+  version: 4,
+  name: 'bill_round_off',
+  up: async (db) => {
+    // Defaults to 0, which is correct for every bill written before this column
+    // existed: those totals were stored unrounded, so nothing was adjusted.
+    await db.execAsync(`
+      ALTER TABLE bills ADD COLUMN round_off REAL NOT NULL DEFAULT 0;
+    `);
+  },
+};
+
 /**
  * Every migration ever shipped, in order. Append only.
  */
-export const MIGRATIONS: Migration[] = [migration001, migration002, migration003];
+export const MIGRATIONS: Migration[] = [
+  migration001,
+  migration002,
+  migration003,
+  migration004,
+];
 
 /** The schema version the current build of the app expects. */
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.reduce(

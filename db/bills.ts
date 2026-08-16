@@ -56,6 +56,8 @@ export type NewBill = {
   cgst_total: number;
   sgst_total: number;
   igst_total: number;
+  /** The "Round Off" line on the invoice. Defaults to 0 when nothing was rounded. */
+  round_off?: number;
   grand_total: number;
   pdf_path?: string | null;
   items: NewBillItem[];
@@ -107,8 +109,8 @@ export async function createBill(
       `INSERT INTO bills
          (invoice_number, date, customer_name, customer_phone, customer_address,
           customer_gstin, customer_state, subtotal, cgst_total, sgst_total,
-          igst_total, grand_total, pdf_path, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          igst_total, round_off, grand_total, pdf_path, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       invoiceNumber,
       date,
       input.customer_name.trim(),
@@ -120,6 +122,7 @@ export async function createBill(
       input.cgst_total,
       input.sgst_total,
       input.igst_total,
+      input.round_off ?? 0,
       input.grand_total,
       input.pdf_path ?? null,
       now
