@@ -263,6 +263,29 @@ confirmation of the shop's existing signage/branding.
   number is not a thing to warn about and allow. A GSTIN/state disagreement is
   serious but recoverable, and the owner may be mid-edit with one of the two
   already correct.
+- **The PDF renders from the STORED bill, never recalculating.** `lib/pdf.ts`
+  reads `bills` and `bill_items` and prints those figures as they are. The
+  customer's copy and the shop's record have to be the same document, and the
+  way they stop being the same is a template that recomputes. This is also why
+  it has its own `summariseStoredItems` instead of reusing `summariseByRate`
+  from `lib/gst.ts` — that one works on freshly calculated lines.
+- **Which tax heads to print is read from the stored amounts, not the states.**
+  If the shop's state is later corrected in Settings, a reprint of an old bill
+  must still show what the customer was actually charged. The one exception is a
+  bill of entirely 0%-rated goods, which carries no tax under any head; that
+  falls back to comparing states, which is safe because only the column heading
+  differs.
+- **A `PLACEHOLDER` value prints as an empty gap.** An invoice reading
+  `PLACEHOLDER_CITY` looks like a system fault; a gap looks like missing data,
+  which is what it is.
+- **The logo is embedded as a `data:` URI, never linked by path.** `expo-print`
+  renders through a WebView, and a `file://` image is not reliably loadable
+  there. `renderBillHtml` therefore takes the bytes and stays pure/synchronous;
+  `generateBillPdf` does the reading. A failed read yields no logo rather than
+  a failed bill.
+- **All free text is escaped into the template.** Customer names and addresses
+  are typed at a counter and land in HTML — "Sharma & Sons" alone would break
+  the markup.
 - **A picked logo is copied out of the cache, never referenced there.**
   `expo-image-picker` returns a URI in the app's cache directory, which Android
   clears under storage pressure and "Clear cache" wipes outright. A path stored
