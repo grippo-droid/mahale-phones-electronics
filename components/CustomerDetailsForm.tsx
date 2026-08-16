@@ -2,7 +2,6 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { BUSINESS_DETAILS } from '@/constants/business';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import StatePicker from '@/components/StatePicker';
 import {
@@ -33,6 +32,12 @@ type Props = {
   /** Fields the user has interacted with — controls when errors appear. */
   touched: Partial<Record<CustomerField, boolean>>;
   onBlurField: (field: CustomerField) => void;
+  /**
+   * The shop's own state, from the settings store rather than the constants
+   * file — it is editable in Settings from T4.1, and this is what the
+   * customer's state is compared against to pick the tax heads.
+   */
+  businessState: string;
   /** Forces every error into view, for when "Generate Bill" is pressed (T3.6). */
   showAllErrors?: boolean;
 };
@@ -42,9 +47,13 @@ export default function CustomerDetailsForm({
   onChangeField,
   touched,
   onBlurField,
+  businessState,
   showAllErrors = false,
 }: Props) {
-  const validation = useMemo(() => validateCustomer(customer), [customer]);
+  const validation = useMemo(
+    () => validateCustomer(customer, businessState),
+    [customer, businessState]
+  );
 
   const errorFor = (field: CustomerField): string | null => {
     if (!showAllErrors && !touched[field]) return null;
@@ -56,8 +65,8 @@ export default function CustomerDetailsForm({
 
   const gstin = parseGstin(customer.gstin);
   const mismatch = gstinStateMismatch(customer);
-  const supplyType = resolveSupplyType(customer.state);
-  const homeState = isPlaceholderState() ? null : BUSINESS_DETAILS.state;
+  const supplyType = resolveSupplyType(customer.state, businessState);
+  const homeState = isPlaceholderState(businessState) ? null : businessState;
 
   return (
     <View style={styles.form}>

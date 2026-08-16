@@ -26,6 +26,7 @@ import { resolveSupplyType, validateCustomer, type CustomerField } from '@/lib/c
 import { formatRupees } from '@/lib/format';
 import { calculateBill, type SupplyType } from '@/lib/gst';
 import { invoiceNumberGenerator } from '@/lib/invoiceNumber';
+import { selectBusinessState, useSettingsStore } from '@/store/settings';
 import {
   selectCustomer,
   selectItemCount,
@@ -80,6 +81,7 @@ export default function BillingScreen() {
   const lines = useCartStore(selectLines);
   const itemCount = useCartStore(selectItemCount);
   const customer = useCartStore(selectCustomer);
+  const businessState = useSettingsStore(selectBusinessState);
   const addProduct = useCartStore((state) => state.addProduct);
   const setQty = useCartStore((state) => state.setQty);
   const changeQty = useCartStore((state) => state.changeQty);
@@ -167,7 +169,10 @@ export default function BillingScreen() {
    * customer's state has not been picked yet (or the shop's own state is still
    * a placeholder), and the figures below are provisional.
    */
-  const supplyType = useMemo(() => resolveSupplyType(customer.state), [customer.state]);
+  const supplyType = useMemo(
+    () => resolveSupplyType(customer.state, businessState),
+    [customer.state, businessState]
+  );
 
   /**
    * In exact arithmetic the grand total does not depend on the place of supply:
@@ -250,7 +255,10 @@ export default function BillingScreen() {
     setTouched((current) => ({ ...current, [field]: true }));
   }, []);
 
-  const customerValidation = useMemo(() => validateCustomer(customer), [customer]);
+  const customerValidation = useMemo(
+    () => validateCustomer(customer, businessState),
+    [customer, businessState]
+  );
 
   // -------------------------------------------------------------------------
   // Generate Bill (T3.6)
@@ -259,7 +267,7 @@ export default function BillingScreen() {
   const writeBill = useCallback(async () => {
     // Re-resolved here rather than trusted from render: this is the value that
     // decides the tax heads on a permanent record.
-    const type = resolveSupplyType(customer.state);
+    const type = resolveSupplyType(customer.state, businessState);
     if (!type) {
       setError('The customer’s state is needed before a bill can be generated.');
       return;
@@ -397,6 +405,7 @@ export default function BillingScreen() {
             onChangeField={setCustomerField}
             touched={touched}
             onBlurField={handleBlurField}
+            businessState={businessState}
             showAllErrors={showAllErrors}
           />
 

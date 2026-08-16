@@ -4,47 +4,62 @@
 **Version:** 1.0
 **Companion to:** PRD, Technical Architecture, Security & Access, and Frontend Spec documents.
 
-**How to use this:** Hand these to Claude Code one at a time, roughly in order. Each ticket is scoped to be independently buildable and testable. Check off as completed.
+**How to use this:** Hand these one at a time, roughly in order. Each ticket is scoped to be independently buildable and testable. Check off as completed.
+
+**Status:** Phases 0–3 complete (26 of 57 tickets). The app takes a sale end to
+end — search stock, build a cart, capture the customer, compute GST, and write a
+numbered bill that decrements inventory. Phase 4 is in progress at T4.1.
+
+Two things are needed before the app raises bills the shop actually gives out:
+
+- **Invoice numbering** — the real format, the reset policy and the starting
+  number. Today's defaults (`MPE/{FY}/{SEQ}`, financial-year reset, starting at
+  1) are placeholders. The starting number matters most: if a paper bill book is
+  part-used, starting at 1 reissues numbers customers already hold. T4.1 makes
+  these editable, but any bill raised before then keeps its number permanently.
+- **Remaining business details** — registered name, address, phone, email, bank
+  details and logo. These print on the invoice, so they bite from T4.2 onward.
+  GSTIN and state are confirmed already.
 
 ---
 
 ## Phase 0 — Project Setup
 
-- [ ] **T0.1** — Initialize Expo project (React Native, TypeScript, Expo Router).
-- [ ] **T0.2** — Set up folder structure per Technical Architecture Document.
-- [ ] **T0.3** — Install core dependencies: `expo-sqlite`, `expo-print`, `expo-sharing`, `expo-file-system`, `zustand`.
-- [ ] **T0.4** — Set up bottom tab navigation (Dashboard / Inventory / Billing / History / Settings) with placeholder screens.
-- [ ] **T0.5** — Confirm app runs via `npx expo start` and loads on phone via Expo Go.
-- [ ] **T0.6** — Create repo `mahale-electronics-app`, connect local project to it.
-- [ ] **T0.7** — Add `.claude/settings.json` with git permission rules (ask before commit/push, deny force-push/hard-reset — see Technical Architecture Section 8).
-- [ ] **T0.8** — Add `CLAUDE.md` with project context (link/summarize the 5 docs) and the git approval rule in plain language.
-- [ ] **T0.9** — Set up `eas.json` with `preview` and `production` build profiles (see Technical Architecture Section 7.3).
+- [x] **T0.1** — Initialize Expo project (React Native, TypeScript, Expo Router).
+- [x] **T0.2** — Set up folder structure per Technical Architecture Document.
+- [x] **T0.3** — Install core dependencies: `expo-sqlite`, `expo-print`, `expo-sharing`, `expo-file-system`, `zustand`.
+- [x] **T0.4** — Set up bottom tab navigation (Dashboard / Inventory / Billing / History / Settings) with placeholder screens.
+- [x] **T0.5** — Confirm app runs via `npx expo start` and loads on phone via Expo Go.
+- [x] **T0.6** — Create repo `mahale-electronics-app`, connect local project to it. *(Created as `mahale-phones-electronics`, matching the shop name.)*
+- [x] **T0.7** — Add `.claude/settings.json` with git permission rules (ask before commit/push, deny force-push/hard-reset — see Technical Architecture Section 8).
+- [x] **T0.8** — Add `CLAUDE.md` with project context (link/summarize the 5 docs) and the git approval rule in plain language.
+- [x] **T0.9** — Set up `eas.json` with `preview` and `production` build profiles (see Technical Architecture Section 7.3).
 
 ## Phase 1 — Database Layer
 
-- [ ] **T1.1** — Define SQLite schema: `products`, `bills`, `bill_items` tables (per PRD Section 7).
-- [ ] **T1.2** — Build DB initialization + migration system (`db/init.ts`, versioned migrations).
-- [ ] **T1.3** — Build `db/products.ts`: create, read, update, delete, search/filter functions.
-- [ ] **T1.4** — Build `db/bills.ts`: create bill + bill_items (transactional), read, search/filter functions.
-- [ ] **T1.5** — Write basic manual test data / seed script to verify DB layer works before UI exists.
+- [x] **T1.1** — Define SQLite schema: `products`, `bills`, `bill_items` tables (per PRD Section 7).
+- [x] **T1.2** — Build DB initialization + migration system (`db/init.ts`, versioned migrations).
+- [x] **T1.3** — Build `db/products.ts`: create, read, update, delete, search/filter functions.
+- [x] **T1.4** — Build `db/bills.ts`: create bill + bill_items (transactional), read, search/filter functions.
+- [x] **T1.5** — Write basic manual test data / seed script to verify DB layer works before UI exists.
 
 ## Phase 2 — Inventory Management
 
-- [ ] **T2.1** — Build Inventory list screen: display all products, search bar, category filter.
-- [ ] **T2.2** — Build low-stock visual indicator (red highlight) based on threshold.
-- [ ] **T2.3** — Build Add Product screen (form + validation + save to DB).
-- [ ] **T2.4** — Build Edit Product screen (load existing product, update, save).
-- [ ] **T2.5** — Build Delete Product flow (with confirmation dialog).
-- [ ] **T2.6** — Wire up stock quantity manual adjustment (e.g., restock without a bill).
+- [x] **T2.1** — Build Inventory list screen: display all products, search bar, category filter.
+- [x] **T2.2** — Build low-stock visual indicator (red highlight) based on threshold.
+- [x] **T2.3** — Build Add Product screen (form + validation + save to DB).
+- [x] **T2.4** — Build Edit Product screen (load existing product, update, save).
+- [x] **T2.5** — Build Delete Product flow (with confirmation dialog).
+- [x] **T2.6** — Wire up stock quantity manual adjustment (e.g., restock without a bill).
 
 ## Phase 3 — GST & Billing Logic
 
-- [ ] **T3.1** — Build `lib/gst.ts`: CGST/SGST vs IGST calculation logic based on business state vs customer state, given item GST rates.
-- [ ] **T3.2** — Build `lib/invoiceNumber.ts`: auto-generate sequential invoice numbers per configured format.
-- [ ] **T3.3** — Build Billing screen: product search/select, quantity input, running cart (Zustand state).
-- [ ] **T3.4** — Build customer details capture step (name, phone required; address, GSTIN optional).
-- [ ] **T3.5** — Build live GST/total summary panel on Billing screen.
-- [ ] **T3.6** — Wire up "Generate Bill": write bill + bill_items to DB, decrement product stock.
+- [x] **T3.1** — Build `lib/gst.ts`: CGST/SGST vs IGST calculation logic based on business state vs customer state, given item GST rates.
+- [x] **T3.2** — Build `lib/invoiceNumber.ts`: auto-generate sequential invoice numbers per configured format.
+- [x] **T3.3** — Build Billing screen: product search/select, quantity input, running cart (Zustand state).
+- [x] **T3.4** — Build customer details capture step (name, phone required; address, GSTIN optional).
+- [x] **T3.5** — Build live GST/total summary panel on Billing screen.
+- [x] **T3.6** — Wire up "Generate Bill": write bill + bill_items to DB, decrement product stock.
 
 ## Phase 4 — Bill Output (PDF, Share, Print)
 
@@ -58,7 +73,7 @@
 
 ## Phase 5 — Dashboard & History
 
-- [ ] **T5.1** — Build Dashboard: today's sales total, bill count, low-stock count (computed from DB).
+- [ ] **T5.1** — Build Dashboard: today's sales total, bill count, low-stock count (computed from DB). *(The Dashboard tab currently holds the temporary T1.5 database verification panel, which this ticket replaces.)*
 - [ ] **T5.2** — Build "New Bill" primary action button → routes to Billing screen.
 - [ ] **T5.3** — Build recent bills list on Dashboard (last 5).
 - [ ] **T5.4** — Build low-stock alert banner with tap-through to filtered Inventory view.

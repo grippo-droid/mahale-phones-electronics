@@ -36,7 +36,13 @@
         }
       ],
       "expo-sqlite",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to choose your shop logo, which is printed on the bill."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

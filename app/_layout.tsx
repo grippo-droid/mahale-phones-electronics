@@ -5,6 +5,7 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
 import { initDatabase } from '@/db/init';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
+import { useSettingsStore } from '@/store/settings';
 
 export default function RootLayout() {
   const [dbError, setDbError] = useState<Error | null>(null);
@@ -14,6 +15,10 @@ export default function RootLayout() {
     let cancelled = false;
 
     initDatabase()
+      // Load the shop's own details before any screen renders. The tax split
+      // and every bill header read from this store, so a screen that mounts
+      // first would briefly work off the placeholder defaults (T4.1).
+      .then(() => useSettingsStore.getState().load())
       .then(() => {
         if (!cancelled) setDbReady(true);
       })

@@ -1,5 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
+import { BUSINESS_DETAILS, type BusinessDetails } from '@/constants/business';
 import { getDatabase } from './init';
 
 /**
@@ -9,8 +10,9 @@ import { getDatabase } from './init';
  * backup/restore carries them with the data — restoring onto a new phone would
  * otherwise silently lose the GSTIN and the invoice counter.
  *
- * T4.1 extends this with the full business details; for now it holds the global
- * low-stock default.
+ * Holds the global low-stock default, the invoice counters, and from T4.1 the
+ * business details — which makes `constants/business.ts` the first-run defaults
+ * only, not the live values. Anything printed on a bill must be read from here.
  */
 
 export const SETTING_KEYS = {
@@ -21,6 +23,31 @@ export const SETTING_KEYS = {
   invoiceResetPolicy: 'invoice_reset_policy',
   invoiceStartNumber: 'invoice_start_number',
 } as const;
+
+/**
+ * Business details (T4.1), one row per field.
+ *
+ * Stored per field rather than as one JSON blob so a future field can be added
+ * without a migration and without rewriting what is already saved — and so a
+ * single corrupt value cannot take the whole business identity with it.
+ */
+export const BUSINESS_SETTING_KEYS = {
+  name: 'business_name',
+  gstin: 'business_gstin',
+  addressLine1: 'business_address_line1',
+  addressLine2: 'business_address_line2',
+  city: 'business_city',
+  state: 'business_state',
+  pincode: 'business_pincode',
+  phone: 'business_phone',
+  email: 'business_email',
+  bankName: 'business_bank_name',
+  bankAccountNumber: 'business_bank_account_number',
+  bankIfsc: 'business_bank_ifsc',
+  logoPath: 'business_logo_path',
+} as const;
+
+export type BusinessSettingField = keyof typeof BUSINESS_SETTING_KEYS;
 
 /** Used until the owner sets their own default in Settings. */
 export const DEFAULT_LOW_STOCK_THRESHOLD = 5;
@@ -132,6 +159,80 @@ export async function listInvoiceCounters(
     periodKey: row.key.slice('invoice_seq:'.length),
     lastUsed: Number.parseInt(row.value ?? '0', 10),
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Business details (T4.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The stored business details, with anything unset falling back to the
+ * first-run defaults in `constants/business.ts`.
+ *
+ * A stored empty string means "the owner deliberately cleared this", and is
+ * kept as empty rather than falling back — otherwise clearing an optional field
+ * such as the bank name would silently restore the placeholder.
+ *
+ * The exception is a field that has never been written at all (NULL), which is
+ * what the fallback is for.
+ */
+export async function getBusinessDetails(
+  db: SQLiteDatabase = getDatabase()
+): Promise<BusinessDetails> {
+  const rows = await db.getAllAsync<{ key: string; value: string | null }>(
+    "SELECT key, value FROM app_settings WHERE key LIKE 'business\\_%' ESCAPE '\\'"
+  );
+  const stored = new Map(rows.map((row) => [row.key, row.value]));
+
+  const read = (field: BusinessSettingField): string | null => {
+    const value = stored.get(BUSINESS_SETTING_KEYS[field]);
+    return value === undefined ? null : value;
+  };
+
+  const text = (field: BusinessSettingField): string => {
+    const value = read(field);
+    return value === null ? (BUSINESS_DETAILS[field] as string) : value;
+  };
+
+  const logo = read('logoPath');
+
+  return {
+    ...BUSINESS_DETAILS,
+    name: text('name'),
+    gstin: text('gstin'),
+    addressLine1: text('addressLine1'),
+    addressLine2: text('addressLine2'),
+    city: text('city'),
+    state: text('state'),
+    pincode: text('pincode'),
+    phone: text('phone'),
+    email: text('email'),
+    bankName: text('bankName'),
+    bankAccountNumber: text('bankAccountNumber'),
+    bankIfsc: text('bankIfsc'),
+    logoPath: logo === null ? BUSINESS_DETAILS.logoPath : logo || null,
+    // Invoice settings are stored under their own keys and owned by
+    // `lib/invoiceNumber.ts` — read them with getInvoiceNumberConfig().
+  };
+}
+
+/**
+ * Writes the business detail fields it is given, leaving the rest alone.
+ *
+ * Takes a partial so the Settings screen can save one section at a time without
+ * having to hold and rewrite every other field.
+ */
+export async function setBusinessDetails(
+  patch: Partial<Record<BusinessSettingField, string | null>>,
+  db: SQLiteDatabase = getDatabase()
+): Promise<void> {
+  const entries = Object.entries(patch) as [BusinessSettingField, string | null][];
+
+  for (const [field, value] of entries) {
+    const key = BUSINESS_SETTING_KEYS[field];
+    if (!key) throw new Error(`Unknown business detail "${field}".`);
+    await setSetting(key, value, db);
+  }
 }
 
 // Reading and writing the invoice *format* settings lives in

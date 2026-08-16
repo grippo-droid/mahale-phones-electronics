@@ -61,6 +61,7 @@ without flagging it to the owner first and explaining why.
 - **expo-sqlite** — local database, the sole source of truth
 - **zustand** — shared app state (bill-in-progress cart, low-stock count, settings)
 - **expo-print** → PDF, **expo-sharing** → Android share sheet, **expo-file-system** → backups
+- **expo-image-picker** — choosing the shop logo in Settings (added in T4.1)
 - **Bluetooth ESC/POS printing** — library chosen in T4.5, once the shop's printer model is known
 - **EAS Build** → APK, installed directly (no Play Store in v1)
 
@@ -76,7 +77,9 @@ app/                      Expo Router screens
   inventory/[id].tsx      edit product
   bill/new.tsx            redirects to the Billing tab, which hosts the flow
   bill/[id].tsx           view / re-share / re-print a past bill
-store/                    zustand stores (cart.ts = the bill in progress)
+store/                    zustand stores
+  cart.ts                 the bill in progress (lines + customer)
+  settings.ts             the shop's own details, hydrated from app_settings
 db/                       data access layer — the seam for future cloud sync
   schema.ts               table definitions + migrations
   init.ts                 DB setup on app start
@@ -84,7 +87,8 @@ db/                       data access layer — the seam for future cloud sync
   bills.ts                bill CRUD (transactional)
   backup.ts               export / import DB
 components/               reusable UI (ProductCard, BillItemRow, GstSummary, LowStockBadge)
-lib/                      gst.ts, pdf.ts, printer.ts, invoiceNumber.ts
+lib/                      gst.ts, pdf.ts, printer.ts, invoiceNumber.ts,
+                          billDraft.ts, customer.ts, gstin.ts, logo.ts
 constants/                business.ts (shop details), theme.ts (colours, spacing, type)
 docs/                     the five planning documents
 ```
@@ -123,9 +127,16 @@ from PRD Section 8 and marked with the string `PLACEHOLDER`. Grep for
   rather than answered separately, so the two cannot disagree. This is what
   decides CGST/SGST vs IGST, so bills now compute the correct split.
 
-`businessStateGstinMismatch()` re-checks that pairing and is meant for the
-Settings screen in T4.1, where both fields become editable and can be made to
-contradict each other.
+`businessStateGstinMismatch()` re-checks that pairing, and the Settings screen
+runs it live — both fields are editable there and can be made to contradict each
+other.
+
+**From T4.1, `constants/business.ts` is the first-run defaults only.** The live
+values are rows in `app_settings`, read through `db/settings.ts` and held in
+`store/settings.ts`. Anything that prints on a bill must read the store, never
+the constants file — the constants are what a fresh install starts from, not
+what the shop currently has. Settings living in the database also means a Phase
+6 backup carries them, so restoring onto a new phone does not lose the GSTIN.
 
 The brand colour in `constants/theme.ts` is also a placeholder, pending
 confirmation of the shop's existing signage/branding.
@@ -241,6 +252,38 @@ confirmation of the shop's existing signage/branding.
   most authoritative-looking thing on the screen and the worst thing to render
   from a guess. Before that it shows the taxable value and an explicitly
   approximate grand total.
+- **A stored empty string is a decision; a missing row is not.** In
+  `getBusinessDetails`, a field that has never been written (NULL) falls back to
+  the `constants/business.ts` default, but one written as `''` stays empty.
+  Otherwise clearing an optional field such as the bank name would silently
+  restore the placeholder on the next read.
+- **An invalid invoice format blocks the save; a GSTIN mismatch only warns.**
+  The asymmetry is deliberate. A format whose token cannot tell two periods
+  apart will hand the same number to two customers, and a duplicate invoice
+  number is not a thing to warn about and allow. A GSTIN/state disagreement is
+  serious but recoverable, and the owner may be mid-edit with one of the two
+  already correct.
+- **A picked logo is copied out of the cache, never referenced there.**
+  `expo-image-picker` returns a URI in the app's cache directory, which Android
+  clears under storage pressure and "Clear cache" wipes outright. A path stored
+  there works perfectly in testing and then silently vanishes months later,
+  taking the logo off every bill printed afterwards with no error to explain it.
+  `lib/logo.ts` copies into the document directory, which is documented as safe
+  from the system deleting it. The saved filename carries a timestamp because
+  React Native caches images by URI — a fixed name would leave the old logo on
+  screen after a replacement.
+- **The logo saves on selection, not with the form's Save button.** It is a file
+  copy rather than a text field, and pairing it with the button would mean a
+  picked image is silently lost by leaving the screen.
+- **SDK 57 file-system API:** use the `File` / `Directory` / `Paths` classes.
+  The old `copyAsync` / `deleteAsync` helpers still exist as names but **throw at
+  runtime** — they moved to `expo-file-system/legacy`.
+- **Business details are hydrated once, before any screen renders.**
+  `app/_layout.tsx` awaits `useSettingsStore.load()` as part of the same gate
+  that waits for the database. `hydrated` stays false if the load fails, so a
+  caller can tell "these are the shop's details" from "these are the compiled
+  placeholders" — the difference between a correct bill header and one reading
+  `PLACEHOLDER_ADDRESS_LINE_1`.
 - **`lib/billDraft.ts` is the only thing that turns a cart into a bill.** It is
   a pure function, so what gets written is checkable without a screen or a
   database, and both the totals shown and the totals stored come from the same
