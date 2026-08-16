@@ -112,11 +112,20 @@ but does not say where stores live, so this follows the usual Expo convention.
 ## Business details are placeholders
 
 `constants/business.ts` holds the shop's GSTIN, address, state, phone, bank
-details and invoice number format. **Every one of these is a placeholder** taken
+details and invoice number format. **Most of these are still placeholders** taken
 from PRD Section 8 and marked with the string `PLACEHOLDER`. Grep for
-`PLACEHOLDER` to find everywhere real data is still needed. The business state in
-particular drives whether a bill is CGST/SGST or IGST, so bills are not correct
-until it is filled in.
+`PLACEHOLDER` to find everywhere real data is still needed.
+
+**Confirmed by the owner (no longer placeholders):**
+
+- `gstin` — `23ALYPM5121B1ZA`. Check digit verified with `lib/gstin.ts`.
+- `state` — `Madhya Pradesh`, derived from the GSTIN's first two digits (`23`)
+  rather than answered separately, so the two cannot disagree. This is what
+  decides CGST/SGST vs IGST, so bills now compute the correct split.
+
+`businessStateGstinMismatch()` re-checks that pairing and is meant for the
+Settings screen in T4.1, where both fields become editable and can be made to
+contradict each other.
 
 The brand colour in `constants/theme.ts` is also a placeholder, pending
 confirmation of the shop's existing signage/branding.
@@ -226,7 +235,8 @@ confirmation of the shop's existing signage/branding.
 
 ## Open decisions (from the planning docs)
 
-- Exact registered business name, GSTIN, and address
+- Exact registered business name, and the shop address (line 1, line 2, city,
+  pincode). GSTIN and state are now confirmed — see above.
 - Invoice numbering: the real format, whether the sequence resets each financial
   year, and the starting number (raise it if a paper bill book is part-used, or
   the app will reissue numbers the customer already holds). Defaults today are

@@ -16,6 +16,11 @@
 // Type-only import, erased at compile time — no runtime cycle with lib/invoiceNumber.
 import type { InvoiceResetPolicy } from '@/lib/invoiceNumber';
 
+// Value imports. Neither reaches back to this module, so there is no cycle:
+// lib/gstin depends only on constants/states, which depends on nothing.
+import { findStateByName } from '@/constants/states';
+import { parseGstin } from '@/lib/gstin';
+
 export type BusinessDetails = {
   name: string;
   gstin: string;
@@ -42,11 +47,16 @@ export type BusinessDetails = {
 export const BUSINESS_DETAILS: BusinessDetails = {
   // PRD Section 8 — confirm the exact registered business name.
   name: 'Mahale Phones and Electronics', // PLACEHOLDER — confirm registered name
-  gstin: 'PLACEHOLDER_GSTIN', // PLACEHOLDER
+  // Confirmed by the owner. Check digit verified with lib/gstin.ts, and the
+  // state below is its first two digits (23) rather than a separate answer, so
+  // the two cannot drift apart.
+  gstin: '23ALYPM5121B1ZA',
   addressLine1: 'PLACEHOLDER_ADDRESS_LINE_1', // PLACEHOLDER
   addressLine2: 'PLACEHOLDER_ADDRESS_LINE_2', // PLACEHOLDER
   city: 'PLACEHOLDER_CITY', // PLACEHOLDER
-  state: 'PLACEHOLDER_STATE', // PLACEHOLDER — drives CGST/SGST vs IGST
+  // Confirmed — drives CGST/SGST vs IGST. Must stay spelled as in
+  // constants/states.ts, which is what the customer's state is matched against.
+  state: 'Madhya Pradesh',
   pincode: 'PLACEHOLDER_PINCODE', // PLACEHOLDER
   phone: 'PLACEHOLDER_PHONE', // PLACEHOLDER
   email: 'PLACEHOLDER_EMAIL', // PLACEHOLDER
@@ -69,4 +79,33 @@ export function hasPlaceholderBusinessDetails(
   return Object.values(details).some(
     (value) => typeof value === 'string' && value.startsWith('PLACEHOLDER')
   );
+}
+
+/**
+ * Checks the shop's own state against the state code inside its own GSTIN.
+ *
+ * The same cross-check the billing screen runs on a customer, pointed at the
+ * business. It matters more here: the customer's state is one bill, the shop's
+ * state is the reference every bill is compared against, so getting it wrong
+ * flips CGST/SGST and IGST on all of them at once.
+ *
+ * Returns null when the two agree, or when either is still unset. Meant for the
+ * Settings screen in T4.1, where both become editable and can be made to
+ * disagree by editing one of them.
+ */
+export function businessStateGstinMismatch(
+  details: BusinessDetails = BUSINESS_DETAILS
+): { gstinState: string; declaredState: string } | null {
+  if (details.gstin.startsWith('PLACEHOLDER') || details.state.startsWith('PLACEHOLDER')) {
+    return null;
+  }
+
+  const parsed = parseGstin(details.gstin);
+  if (!parsed.valid || !parsed.state) return null;
+
+  const declared = findStateByName(details.state);
+  if (!declared) return null;
+  if (declared.code === parsed.state.code) return null;
+
+  return { gstinState: parsed.state.name, declaredState: declared.name };
 }
