@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { formatRupees } from '@/lib/format';
-import { calculateLine } from '@/lib/gst';
+import { calculateLine, type SupplyType } from '@/lib/gst';
 import type { CartLine } from '@/store/cart';
 
 /**
@@ -25,12 +25,18 @@ type Props = {
    * product has been deleted since it was added.
    */
   stockQty: number | null;
+  /**
+   * Which tax heads apply. Passed in rather than assumed because rounding CGST
+   * and SGST separately can leave a line a paisa away from the same line taxed
+   * as IGST — see the note on `grandTotal` in the Billing screen.
+   */
+  supplyType: SupplyType;
   onChangeQty: (productId: number, qty: number) => void;
   onStep: (productId: number, delta: number) => void;
   onRemove: (productId: number) => void;
 };
 
-function BillItemRow({ line, stockQty, onChangeQty, onStep, onRemove }: Props) {
+function BillItemRow({ line, stockQty, supplyType, onChangeQty, onStep, onRemove }: Props) {
   // Held as text while editing so the field can be briefly empty mid-typing;
   // only valid whole numbers reach the store.
   const [qtyText, setQtyText] = useState(String(line.qty));
@@ -39,8 +45,6 @@ function BillItemRow({ line, stockQty, onChangeQty, onStep, onRemove }: Props) {
     setQtyText(String(line.qty));
   }, [line.qty]);
 
-  // The line total is the same figure regardless of CGST/SGST versus IGST, so it
-  // can be shown before the customer's state is known (T3.4 settles the split).
   const totals = calculateLine(
     {
       unitPrice: line.unitPrice,
@@ -48,7 +52,7 @@ function BillItemRow({ line, stockQty, onChangeQty, onStep, onRemove }: Props) {
       gstRate: line.gstRate,
       priceIncludesGst: line.priceIncludesGst,
     },
-    'intra-state'
+    supplyType
   );
 
   const missing = stockQty === null;

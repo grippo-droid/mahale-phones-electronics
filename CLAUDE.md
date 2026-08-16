@@ -189,9 +189,40 @@ confirmation of the shop's existing signage/branding.
   confirm. A blocking confirmation belongs where an edit is deliberate — see
   `StockAdjuster` — not where a condition is merely reported. If a consolidated
   confirmation is ever wanted, T3.6's "Generate Bill" is the place for it.
-- **The running total can be shown before the customer's state is known.** The
-  grand total is invariant to the place of supply: CGST + SGST at half the rate
-  each equals IGST at the full rate. Only the breakdown has to wait for T3.4.
+- **The running total is only *nearly* invariant to the place of supply, so the
+  real supply type is used the moment it is known.** In exact arithmetic CGST +
+  SGST at half the rate each equals IGST at the full rate. The implementation is
+  not exact: CGST and SGST must come out precisely equal, so each is rounded to
+  paise independently at half the rate, and twice a rounded half is not always
+  the rounded whole. The two routes land a paisa or two apart, which after
+  rounding to the rupee flips the grand total by ₹1 on roughly **one cart in a
+  hundred** (measured, not estimated — see the t34 suite). So `resolveSupplyType`
+  drives both the bar total and the line totals as soon as the customer's state
+  is set, and the stand-in used before that is labelled "approx. until state is
+  set" rather than shown as the price. The T3.3 note that claimed plain
+  invariance was wrong.
+- **Customer state and GSTIN are picked and checked, never trusted as typed.**
+  The state comes from a fixed list (`constants/states.ts`) because a typo
+  decides CGST/SGST versus IGST. A customer's GSTIN carries its own state in its
+  first two digits, so a valid GSTIN that disagrees with the picked state is
+  surfaced as a warning with a one-tap fix — the two cannot both be right.
+- **A bad GSTIN warns; it never blocks the sale.** Only name, phone and state
+  block, because `bills` declares those NOT NULL and state drives the tax heads.
+  A GSTIN failing its check digit, or contradicting the state, is real
+  information but not grounds to refuse to record a sale — the shop cannot stop
+  billing a customer because the number on their card was misread, and a blocked
+  sale with a queue waiting is worse than an invoice needing a correction.
+  `lib/gstin.ts` implements the published check-digit algorithm; it rejects every
+  possible single-character typo (verified exhaustively, 490 mutations).
+- **`resolveSupplyType` returns null rather than defaulting.** When the
+  customer's state is blank, or the shop's own state is still `PLACEHOLDER`, no
+  supply type is returned. A default would print a CGST/SGST breakdown that
+  looks authoritative and could be wrong; showing nothing is the honest state.
+  The unset shop state also raises a warning on the bill being built, not just
+  in Settings.
+- **Both billing steps are reachable at any time.** The step switch does not
+  gate step 2 behind step 1 — a customer often gives their name before the last
+  item is on the bill, and forcing an order onto that means going back and forth.
 
 ## Open decisions (from the planning docs)
 

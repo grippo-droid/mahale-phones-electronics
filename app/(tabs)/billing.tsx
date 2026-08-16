@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -15,11 +16,14 @@ import {
 } from 'react-native';
 
 import BillItemRow from '@/components/BillItemRow';
+import CustomerDetailsForm from '@/components/CustomerDetailsForm';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { getProductsByIds, listProducts, type Product } from '@/db/products';
+import { resolveSupplyType, validateCustomer, type CustomerField } from '@/lib/customer';
 import { formatRupees } from '@/lib/format';
-import { calculateBill } from '@/lib/gst';
+import { calculateBill, type SupplyType } from '@/lib/gst';
 import {
+  selectCustomer,
   selectItemCount,
   selectLines,
   useCartStore,
@@ -27,25 +31,37 @@ import {
 } from '@/store/cart';
 
 /**
- * Billing — step 1: search, select and set quantities (T3.3).
+ * Billing — items (T3.3) and customer details (T3.4).
  *
- * Frontend Spec 2.4 describes billing as steps; this is the first. Customer
- * details are T3.4, the GST breakdown panel is T3.5 and "Generate Bill" is T3.6.
+ * Frontend Spec 2.4 describes billing as steps. Both steps live on this one
+ * screen behind a switch at the top rather than as pushed screens, so moving
+ * between them never risks the cart and the tab bar stays available mid-bill:
+ * looking up a price on the Inventory tab part-way through a sale is a normal
+ * thing to do at a counter, and the cart is in Zustand precisely so that round
+ * trip costs nothing.
  *
- * The flow lives on the tab rather than in a pushed screen so the tab bar stays
- * available mid-bill. Looking up a price on the Inventory tab part-way through a
- * sale is a normal thing to do at a counter, and the cart is in Zustand
- * precisely so that round trip costs nothing.
+ * On the items step one search box drives everything: type to find products to
+ * add, clear it to see the bill. The running total sits in a bar pinned to the
+ * bottom, so what has been added stays visible on both steps.
  *
- * One search box drives the whole screen: type to find products to add, clear it
- * to see the bill. The running total sits in a bar pinned to the bottom, so what
- * has been added is visible even while searching.
+ * The GST breakdown panel is T3.5 and "Generate Bill" is T3.6.
  */
 
 const SEARCH_DEBOUNCE_MS = 250;
 const SEARCH_RESULT_LIMIT = 40;
 
+/**
+ * Used only to put a number on screen before the customer's state is known.
+ * Most sales are local, so this is the likelier of the two — but see the note on
+ * `grandTotal` for why it is a stand-in and not simply the answer.
+ */
+const PROVISIONAL_SUPPLY_TYPE = 'intra-state' as const;
+
+type Step = 'items' | 'customer';
+
 export default function BillingScreen() {
+  const [step, setStep] = useState<Step>('items');
+  const [touched, setTouched] = useState<Partial<Record<CustomerField, boolean>>>({});
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [results, setResults] = useState<Product[]>([]);
@@ -57,10 +73,12 @@ export default function BillingScreen() {
 
   const lines = useCartStore(selectLines);
   const itemCount = useCartStore(selectItemCount);
+  const customer = useCartStore(selectCustomer);
   const addProduct = useCartStore((state) => state.addProduct);
   const setQty = useCartStore((state) => state.setQty);
   const changeQty = useCartStore((state) => state.changeQty);
   const removeLine = useCartStore((state) => state.removeLine);
+  const setCustomerField = useCartStore((state) => state.setCustomerField);
   const clear = useCartStore((state) => state.clear);
 
   const hasSearchTerm = debouncedSearch.trim().length > 0;
@@ -138,10 +156,26 @@ export default function BillingScreen() {
     [lines]
   );
 
-  // The grand total does not depend on the place of supply: CGST + SGST at half
-  // the rate each comes to the same figure as IGST at the full rate. So a total
-  // can be shown before the customer's state is known in T3.4, and only the
-  // breakdown has to wait.
+  /**
+   * The place of supply, once it can honestly be decided. Null means the
+   * customer's state has not been picked yet (or the shop's own state is still
+   * a placeholder), and the figures below are provisional.
+   */
+  const supplyType = useMemo(() => resolveSupplyType(customer.state), [customer.state]);
+
+  /**
+   * In exact arithmetic the grand total does not depend on the place of supply:
+   * CGST + SGST at half the rate each is the same as IGST at the full rate. It
+   * is not exact in practice. CGST and SGST have to come out precisely equal, so
+   * each is rounded to paise independently at half the rate — and twice the
+   * rounded half is not always the rounded whole. The two routes end up a paisa
+   * or two apart, which after rounding to the rupee flips the total by ₹1 on
+   * roughly one cart in a hundred.
+   *
+   * So the real supply type is used as soon as it is known, and only falls back
+   * to a stand-in while the state is still blank. The fallback is marked
+   * provisional in the summary bar rather than presented as the price.
+   */
   const grandTotal = useMemo(
     () =>
       calculateBill(
@@ -151,10 +185,10 @@ export default function BillingScreen() {
           gstRate: line.gstRate,
           priceIncludesGst: line.priceIncludesGst,
         })),
-        'intra-state',
+        supplyType ?? PROVISIONAL_SUPPLY_TYPE,
         { roundToNearestRupee: true }
       ).totals.grandTotal,
-    [lines]
+    [lines, supplyType]
   );
 
   const oversoldCount = useMemo(
@@ -175,44 +209,81 @@ export default function BillingScreen() {
   );
 
   const confirmClear = useCallback(() => {
-    Alert.alert('Clear this bill?', 'All items will be removed. Nothing has been saved yet.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: clear },
-    ]);
+    Alert.alert(
+      'Clear this bill?',
+      'The items and the customer details will both be removed. Nothing has been saved yet.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: () => {
+            clear();
+            setTouched({});
+            setStep('items');
+          },
+        },
+      ]
+    );
   }, [clear]);
 
-  const showResults = hasSearchTerm;
+  const handleBlurField = useCallback((field: CustomerField) => {
+    setTouched((current) => ({ ...current, [field]: true }));
+  }, []);
+
+  const customerValidation = useMemo(() => validateCustomer(customer), [customer]);
+
+  const showResults = step === 'items' && hasSearchTerm;
 
   return (
     <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={styles.searchBar}>
-        <Ionicons name="search" size={20} color={Colors.textMuted} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search products to add"
-          placeholderTextColor={Colors.textMuted}
-          value={searchInput}
-          onChangeText={setSearchInput}
-          autoCorrect={false}
-          returnKeyType="search"
-          accessibilityLabel="Search products to add to the bill"
-        />
-        {searchInput.length > 0 ? (
-          <Pressable
-            onPress={() => setSearchInput('')}
-            hitSlop={Spacing.sm}
-            accessibilityRole="button"
-            accessibilityLabel="Clear search">
-            <Ionicons name="close-circle" size={20} color={Colors.textMuted} />
-          </Pressable>
-        ) : null}
-      </View>
+      <StepSwitch step={step} onChange={setStep} customerDone={customerValidation.canGenerate} />
+
+      {step === 'items' ? (
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={20} color={Colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search products to add"
+            placeholderTextColor={Colors.textMuted}
+            value={searchInput}
+            onChangeText={setSearchInput}
+            autoCorrect={false}
+            returnKeyType="search"
+            accessibilityLabel="Search products to add to the bill"
+          />
+          {searchInput.length > 0 ? (
+            <Pressable
+              onPress={() => setSearchInput('')}
+              hitSlop={Spacing.sm}
+              accessibilityRole="button"
+              accessibilityLabel="Clear search">
+              <Ionicons name="close-circle" size={20} color={Colors.textMuted} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      {showResults ? (
+      {step === 'customer' ? (
+        <ScrollView
+          style={styles.customerScroll}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.customerScrollContent}>
+          <CustomerDetailsForm
+            customer={customer}
+            onChangeField={setCustomerField}
+            touched={touched}
+            onBlurField={handleBlurField}
+          />
+          <Text style={styles.nextStepNote}>
+            The GST breakdown and “Generate Bill” come next.
+          </Text>
+        </ScrollView>
+      ) : showResults ? (
         <SearchResults
           results={results}
           searching={searching}
@@ -224,6 +295,7 @@ export default function BillingScreen() {
         <Cart
           lines={lines}
           stockById={stockById}
+          supplyType={supplyType ?? PROVISIONAL_SUPPLY_TYPE}
           onChangeQty={setQty}
           onStep={changeQty}
           onRemove={removeLine}
@@ -246,6 +318,11 @@ export default function BillingScreen() {
 
           <View style={styles.summaryRight}>
             <Text style={styles.summaryTotal}>{formatRupees(grandTotal)}</Text>
+            {/* Honest about the one rupee: without the state this can land a
+                rupee either side of the final figure. */}
+            {supplyType === null ? (
+              <Text style={styles.provisionalNote}>approx. until state is set</Text>
+            ) : null}
             <Pressable
               onPress={confirmClear}
               hitSlop={Spacing.sm}
@@ -255,6 +332,19 @@ export default function BillingScreen() {
             </Pressable>
           </View>
         </View>
+      ) : null}
+
+      {/* Moving on is only offered once there is something to bill — a customer
+          form filled in for an empty bill would have nothing to attach to. */}
+      {step === 'items' && lines.length > 0 && !showResults ? (
+        <Pressable
+          style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}
+          onPress={() => setStep('customer')}
+          accessibilityRole="button"
+          accessibilityLabel="Continue to customer details">
+          <Text style={styles.primaryButtonText}>Next: customer details</Text>
+          <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
+        </Pressable>
       ) : null}
 
       {showResults && lines.length > 0 ? (
@@ -267,6 +357,45 @@ export default function BillingScreen() {
         </Pressable>
       ) : null}
     </KeyboardAvoidingView>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+type StepSwitchProps = {
+  step: Step;
+  onChange: (step: Step) => void;
+  customerDone: boolean;
+};
+
+/**
+ * Both steps are reachable at any time rather than the second being unlocked by
+ * the first. A customer often gives their name before the last item is scanned,
+ * and forcing an order onto that would mean going back and forth.
+ */
+function StepSwitch({ step, onChange, customerDone }: StepSwitchProps) {
+  return (
+    <View style={styles.stepSwitch}>
+      {(['items', 'customer'] as const).map((value) => {
+        const active = step === value;
+        return (
+          <Pressable
+            key={value}
+            style={[styles.stepTab, active && styles.stepTabActive]}
+            onPress={() => onChange(value)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
+            accessibilityLabel={value === 'items' ? 'Items step' : 'Customer details step'}>
+            <Text style={[styles.stepTabText, active && styles.stepTabTextActive]}>
+              {value === 'items' ? '1. Items' : '2. Customer'}
+            </Text>
+            {value === 'customer' && customerDone ? (
+              <Ionicons name="checkmark-circle" size={16} color={Colors.inStock} />
+            ) : null}
+          </Pressable>
+        );
+      })}
+    </View>
   );
 }
 
@@ -359,12 +488,13 @@ function SearchResultRow({ product, qtyInCart, onAdd }: SearchResultRowProps) {
 type CartProps = {
   lines: CartLine[];
   stockById: Record<number, number>;
+  supplyType: SupplyType;
   onChangeQty: (productId: number, qty: number) => void;
   onStep: (productId: number, delta: number) => void;
   onRemove: (productId: number) => void;
 };
 
-function Cart({ lines, stockById, onChangeQty, onStep, onRemove }: CartProps) {
+function Cart({ lines, stockById, supplyType, onChangeQty, onStep, onRemove }: CartProps) {
   if (lines.length === 0) {
     return (
       <View style={styles.centered}>
@@ -386,6 +516,7 @@ function Cart({ lines, stockById, onChangeQty, onStep, onRemove }: CartProps) {
         <BillItemRow
           line={item}
           stockQty={stockById[item.productId] ?? null}
+          supplyType={supplyType}
           onChangeQty={onChangeQty}
           onStep={onStep}
           onRemove={onRemove}
@@ -393,7 +524,7 @@ function Cart({ lines, stockById, onChangeQty, onStep, onRemove }: CartProps) {
       )}
       ListFooterComponent={
         <Text style={styles.nextStepNote}>
-          Customer details and the GST breakdown come next.
+          The GST breakdown and “Generate Bill” come after the customer details.
         </Text>
       }
     />
@@ -404,6 +535,43 @@ function Cart({ lines, stockById, onChangeQty, onStep, onRemove }: CartProps) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: Colors.background },
+
+  stepSwitch: {
+    flexDirection: 'row',
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  stepTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    height: Spacing.minTapTarget,
+    borderBottomWidth: 3,
+    borderBottomColor: 'transparent',
+  },
+  stepTabActive: { borderBottomColor: Colors.brand, backgroundColor: Colors.background },
+  stepTabText: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.textMuted },
+  stepTabTextActive: { color: Colors.brand, fontWeight: '700' },
+
+  customerScroll: { flex: 1 },
+  customerScrollContent: { paddingBottom: Spacing.lg },
+
+  primaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    margin: Spacing.md,
+    height: Spacing.minTapTarget + 4,
+    borderRadius: 8,
+    backgroundColor: Colors.brand,
+  },
+  primaryButtonPressed: { backgroundColor: Colors.brandDark },
+  primaryButtonText: { color: '#FFFFFF', fontSize: FontSizes.body, fontWeight: '700' },
+
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -477,6 +645,7 @@ const styles = StyleSheet.create({
   summaryWarning: { fontSize: FontSizes.small, color: Colors.outOfStock, fontWeight: '600' },
   summaryRight: { alignItems: 'flex-end', gap: 2 },
   summaryTotal: { fontSize: FontSizes.title, fontWeight: '700', color: Colors.text },
+  provisionalNote: { fontSize: FontSizes.small - 3, color: Colors.textMuted },
   clearText: { fontSize: FontSizes.small, color: Colors.outOfStock, fontWeight: '700' },
 
   viewCartHint: { paddingVertical: Spacing.sm, alignItems: 'center', backgroundColor: Colors.background },

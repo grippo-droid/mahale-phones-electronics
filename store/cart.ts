@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 import type { Product } from '@/db/products';
+import { EMPTY_CUSTOMER, type Customer, type CustomerField } from '@/lib/customer';
 
 /**
  * The bill in progress (T3.3).
@@ -23,7 +24,10 @@ import type { Product } from '@/db/products';
  * live from the database instead of trusting a copy.
  * ---------------------------------------------------------------------------
  *
- * T3.4 extends this store with the customer details.
+ * The customer (T3.4) lives here too, and for the same reason as the lines: it
+ * has to survive a trip to another tab. It is held as raw text exactly as typed,
+ * with validation left to `lib/customer.ts` — a store that rejected input would
+ * make a half-typed phone number impossible to hold.
  */
 
 export type CartLine = {
@@ -39,11 +43,16 @@ export type CartLine = {
 
 type CartState = {
   lines: CartLine[];
+  customer: Customer;
   /** Adds the product, or bumps the quantity if it is already on the bill. */
   addProduct: (product: Product) => void;
   setQty: (productId: number, qty: number) => void;
   changeQty: (productId: number, delta: number) => void;
   removeLine: (productId: number) => void;
+  setCustomerField: (field: CustomerField, value: string) => void;
+  setCustomer: (customer: Customer) => void;
+  resetCustomer: () => void;
+  /** Empties the whole bill — lines and customer both. */
   clear: () => void;
 };
 
@@ -59,6 +68,7 @@ function normaliseQty(qty: number): number {
 
 export const useCartStore = create<CartState>((set) => ({
   lines: [],
+  customer: EMPTY_CUSTOMER,
 
   addProduct: (product) =>
     set((state) => {
@@ -112,7 +122,17 @@ export const useCartStore = create<CartState>((set) => ({
   removeLine: (productId) =>
     set((state) => ({ lines: state.lines.filter((line) => line.productId !== productId) })),
 
-  clear: () => set({ lines: [] }),
+  setCustomerField: (field, value) =>
+    set((state) => ({ customer: { ...state.customer, [field]: value } })),
+
+  setCustomer: (customer) => set({ customer }),
+
+  resetCustomer: () => set({ customer: EMPTY_CUSTOMER }),
+
+  // Clearing the bill clears the customer as well. The next sale is to a
+  // different person, and a name left over from the last one is exactly the
+  // sort of thing that reaches an invoice unnoticed.
+  clear: () => set({ lines: [], customer: EMPTY_CUSTOMER }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -132,3 +152,9 @@ export const selectItemCount = (state: CartState) =>
 export const selectLineCount = (state: CartState) => state.lines.length;
 
 export const selectIsEmpty = (state: CartState) => state.lines.length === 0;
+
+export const selectCustomer = (state: CartState) => state.customer;
+
+/** The customer's state on its own, so a component that only needs the tax
+ *  split does not re-render on every keystroke in the name field. */
+export const selectCustomerState = (state: CartState) => state.customer.state;
