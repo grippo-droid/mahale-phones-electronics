@@ -74,8 +74,9 @@ app/                      Expo Router screens
   (tabs)/                 dashboard, inventory, billing, history, settings
   inventory/add.tsx       add product
   inventory/[id].tsx      edit product
-  bill/new.tsx            create a bill
+  bill/new.tsx            redirects to the Billing tab, which hosts the flow
   bill/[id].tsx           view / re-share / re-print a past bill
+store/                    zustand stores (cart.ts = the bill in progress)
 db/                       data access layer — the seam for future cloud sync
   schema.ts               table definitions + migrations
   init.ts                 DB setup on app start
@@ -91,6 +92,9 @@ docs/                     the five planning documents
 Screens must not talk to SQLite directly — they go through the repository
 functions in `db/`. That separation is deliberate: it is where cloud sync would
 plug in later without rewriting the UI.
+
+`store/` is not in the Architecture doc's folder list — the doc mandates zustand
+but does not say where stores live, so this follows the usual Expo convention.
 
 ## Commands
 
@@ -168,6 +172,26 @@ confirmation of the shop's existing signage/branding.
 - **`invoiceNumberToFileName()` lives in `lib/invoiceNumber.ts`**, not in the PDF
   module. Indian invoice numbers contain slashes, which are path separators — the
   mapping to a safe filename must have exactly one definition. Use it in T4.2.
+- **The billing flow lives on the Billing tab, not a pushed screen.** The tab bar
+  stays reachable mid-bill, because checking a price on the Inventory tab during
+  a sale is normal at a counter — and the cart is in zustand so that round trip
+  costs nothing. `app/bill/new.tsx` is kept as a redirect so the documented route
+  and T5.2's "New Bill" button still work.
+- **A cart line is a price snapshot, not a live view of the product.** Name,
+  price, GST rate and HSN are copied in when the item is added, and are what
+  `bill_items` stores. Editing a product mid-bill must not silently reprice a
+  line the customer has already been quoted. Stock is the deliberate exception —
+  it is NOT held in the cart, because it moves as other sales and adjustments
+  land; the screen reads it live via `getProductsByIds` on focus.
+- **Oversell is reported inline on the cart line, never as a modal.** A dialog on
+  every oversold line trains the user to dismiss it unread, and it hides the cart
+  it is describing. Negative stock is a fact about the records, not a decision to
+  confirm. A blocking confirmation belongs where an edit is deliberate — see
+  `StockAdjuster` — not where a condition is merely reported. If a consolidated
+  confirmation is ever wanted, T3.6's "Generate Bill" is the place for it.
+- **The running total can be shown before the customer's state is known.** The
+  grand total is invariant to the place of supply: CGST + SGST at half the rate
+  each equals IGST at the full rate. Only the breakdown has to wait for T3.4.
 
 ## Open decisions (from the planning docs)
 

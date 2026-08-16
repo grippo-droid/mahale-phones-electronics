@@ -143,6 +143,32 @@ export async function getProductById(
   return decorate(row, await getGlobalLowStockThreshold(db));
 }
 
+/**
+ * Several products in one query, for the billing cart (T3.3).
+ *
+ * The cart holds a price snapshot taken when each item was added, but stock
+ * moves underneath it — another bill, or a manual adjustment. This refetches the
+ * live rows so the oversell warning reflects the current count rather than what
+ * was true when the item was tapped.
+ *
+ * Missing ids are simply absent from the result: a product deleted mid-bill is a
+ * real case, and the caller decides how to handle it.
+ */
+export async function getProductsByIds(
+  ids: number[],
+  db: SQLiteDatabase = getDatabase()
+): Promise<Product[]> {
+  if (ids.length === 0) return [];
+
+  const globalThreshold = await getGlobalLowStockThreshold(db);
+  const placeholders = ids.map(() => '?').join(', ');
+  const rows = await db.getAllAsync<ProductRow>(
+    `SELECT * FROM products WHERE id IN (${placeholders})`,
+    ids
+  );
+  return rows.map((row) => decorate(row, globalThreshold));
+}
+
 /** Low-stock count for the Dashboard badge (T5.1). */
 export async function countLowStockProducts(
   db: SQLiteDatabase = getDatabase()
