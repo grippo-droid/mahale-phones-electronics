@@ -6,7 +6,7 @@
 
 **How to use this:** Hand these one at a time, roughly in order. Each ticket is scoped to be independently buildable and testable. Check off as completed.
 
-**Status:** 32 of 57 tickets. Phases 0–3 complete; Phase 4 complete except
+**Status:** 33 of 57 tickets. Phases 0–3 complete; Phase 4 complete except
 Bluetooth printing (T4.5–T4.7, blocked); Phase 5 started at T5.1.
 
 The app takes a sale end to end — search stock, build a cart, capture the
@@ -79,7 +79,7 @@ render it as a GST invoice to share on WhatsApp or print.
 
 - [x] **T5.1** — Build Dashboard: today's sales total, bill count, low-stock count (computed from DB). *(The Dashboard tab currently holds the temporary T1.5 database verification panel, which this ticket replaces.)*
 - [x] **T5.2** — Build "New Bill" primary action button → routes to Billing screen.
-- [ ] **T5.3** — Build recent bills list on Dashboard (last 5).
+- [x] **T5.3** — Build recent bills list on Dashboard (last 5).
 - [ ] **T5.4** — Build low-stock alert banner with tap-through to filtered Inventory view.
 - [ ] **T5.5** — Build History screen: full chronological bill list, search by customer/phone/invoice number, date range filter.
 - [ ] **T5.6** — Wire up tapping a past bill to reopen Bill Result screen (re-share/re-print).

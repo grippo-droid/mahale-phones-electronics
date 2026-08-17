@@ -12,9 +12,10 @@ import {
 } from 'react-native';
 
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import { getSalesSummary } from '@/db/bills';
+import { getRecentBills, getSalesSummary } from '@/db/bills';
+import type { BillRow } from '@/db/schema';
 import { countLowStockProducts } from '@/db/products';
-import { formatRupees } from '@/lib/format';
+import { formatBillWhen, formatRupees } from '@/lib/format';
 import { selectItemCount, useCartStore } from '@/store/cart';
 import { selectBusiness, useSettingsStore } from '@/store/settings';
 
@@ -29,8 +30,11 @@ import { selectBusiness, useSettingsStore } from '@/store/settings';
  * cached. These are counts over a few hundred rows at most; a stale figure on
  * the screen the owner checks first would cost more than the query does.
  *
- * The recent bills list is T5.3 and the tappable low-stock banner T5.4.
+ * The tappable low-stock banner is T5.4.
  */
+
+/** Frontend Spec 2.1 — the last five bills. */
+const RECENT_BILL_COUNT = 5;
 
 type Stats = {
   todayTotal: number;
@@ -49,6 +53,7 @@ export default function DashboardScreen() {
   const cartCount = useCartStore(selectItemCount);
 
   const [stats, setStats] = useState<Stats | null>(null);
+  const [recent, setRecent] = useState<BillRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,12 +61,13 @@ export default function DashboardScreen() {
   const load = useCallback(async () => {
     try {
       const now = new Date();
-      const [today, month, lowStock] = await Promise.all([
+      const [today, month, lowStock, recentBills] = await Promise.all([
         // Both ends are today: getSalesSummary widens them to the local day, so
         // a bill raised at 9pm counts towards that evening and not tomorrow.
         getSalesSummary(now, now),
         getSalesSummary(startOfMonth(now), now),
         countLowStockProducts(),
+        getRecentBills(RECENT_BILL_COUNT),
       ]);
 
       setStats({
@@ -70,6 +76,7 @@ export default function DashboardScreen() {
         monthTotal: month.total,
         lowStock,
       });
+      setRecent(recentBills);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -187,9 +194,19 @@ export default function DashboardScreen() {
         <Text style={styles.monthValue}>{formatRupees(stats?.monthTotal ?? 0)}</Text>
       </View>
 
-      <Text style={styles.footnote}>
-        Recent bills and the low-stock shortcut come next.
-      </Text>
+      <View style={styles.recent}>
+        <Text style={styles.sectionTitle}>Recent bills</Text>
+
+        {recent.length === 0 ? (
+          <Text style={styles.emptyRecent}>
+            No bills yet. Tap New Bill above to make the first one.
+          </Text>
+        ) : (
+          recent.map((row) => <RecentBillRow key={row.id} bill={row} />)
+        )}
+      </View>
+
+      <Text style={styles.footnote}>The low-stock shortcut comes next.</Text>
     </ScrollView>
   );
 }
@@ -202,6 +219,27 @@ type StatCardProps = {
   value: string;
   tone: 'neutral' | 'warning';
 };
+
+function RecentBillRow({ bill }: { bill: BillRow }) {
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.billRow, pressed && styles.billRowPressed]}
+      onPress={() => router.push({ pathname: '/bill/[id]', params: { id: String(bill.id) } })}
+      accessibilityRole="button"
+      accessibilityLabel={`Bill ${bill.invoice_number} for ${bill.customer_name}, ${formatRupees(bill.grand_total)}`}>
+      <View style={styles.billMain}>
+        <Text style={styles.billCustomer} numberOfLines={1}>
+          {bill.customer_name}
+        </Text>
+        <Text style={styles.billMeta} numberOfLines={1}>
+          {bill.invoice_number} · {formatBillWhen(bill.date)}
+        </Text>
+      </View>
+      <Text style={styles.billTotal}>{formatRupees(bill.grand_total)}</Text>
+      <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+    </Pressable>
+  );
+}
 
 function StatCard({ icon, label, value, tone }: StatCardProps) {
   const warning = tone === 'warning';
@@ -269,6 +307,24 @@ const styles = StyleSheet.create({
   newBillText: { flex: 1 },
   newBillLabel: { fontSize: FontSizes.title, fontWeight: '700', color: '#FFFFFF' },
   newBillSub: { fontSize: FontSizes.small, color: '#FFFFFF', opacity: 0.9 },
+
+  recent: { gap: Spacing.xs },
+  sectionTitle: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text, marginBottom: Spacing.xs },
+  emptyRecent: { fontSize: FontSizes.small, color: Colors.textMuted, paddingVertical: Spacing.sm },
+  billRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    minHeight: Spacing.minTapTarget,
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  billRowPressed: { backgroundColor: Colors.surface },
+  billMain: { flex: 1, gap: 2 },
+  billCustomer: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.text },
+  billMeta: { fontSize: FontSizes.small, color: Colors.textMuted },
+  billTotal: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text, fontVariant: ['tabular-nums'] },
 
   statRow: { flexDirection: 'row', gap: Spacing.md },
   card: {
