@@ -20,7 +20,8 @@ import CustomerDetailsForm from '@/components/CustomerDetailsForm';
 import GstSummary from '@/components/GstSummary';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { createBill } from '@/db/bills';
-import { getProductsByIds, listProducts, type Product } from '@/db/products';
+import { getProductsByIds, listProducts, listUsedCategories, type Product } from '@/db/products';
+import { ALL_CATEGORIES, buildCategoryFilters } from '@/lib/categories';
 import { buildNewBill, findDeletedProducts, findOversells } from '@/lib/billDraft';
 import { resolveSupplyType, validateCustomer, type CustomerField } from '@/lib/customer';
 import { formatRupees } from '@/lib/format';
@@ -45,11 +46,18 @@ import {
  * thing to do at a counter, and the cart is in Zustand precisely so that round
  * trip costs nothing.
  *
- * On the items step one search box drives everything: type to find products to
- * add, clear it to see the bill. The running total sits in a bar pinned to the
- * bottom, so what has been added stays visible on both steps.
+ * On the items step there are two ways to reach a product: type a search, or
+ * tap a category chip (T3.7). Either one puts the screen into browsing mode;
+ * clearing both shows the bill again. Browsing by category exists because a
+ * counter should not require typing a search for every item — and the chips
+ * carry the same list as Inventory, orphaned categories included, or products
+ * in a retired category would be unreachable when billing.
  *
- * The GST breakdown panel is T3.5 and "Generate Bill" is T3.6.
+ * The running total sits in a bar pinned to the bottom, so what has been added
+ * stays visible on both steps.
+ *
+ * The GST breakdown panel is T3.5 and "Generate Bill" is T3.6. The frequently
+ * sold shortcut is T3.8.
  */
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -69,6 +77,8 @@ export default function BillingScreen() {
   const [touched, setTouched] = useState<Partial<Record<CustomerField, boolean>>>({});
   const [showAllErrors, setShowAllErrors] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [category, setCategory] = useState<string>(ALL_CATEGORIES);
+  const [usedCategories, setUsedCategories] = useState<string[]>([]);
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [results, setResults] = useState<Product[]>([]);
@@ -90,6 +100,14 @@ export default function BillingScreen() {
   const clear = useCartStore((state) => state.clear);
 
   const hasSearchTerm = debouncedSearch.trim().length > 0;
+  const hasCategory = category !== ALL_CATEGORIES;
+  /** Browsing products, rather than looking at the bill. */
+  const browsing = hasSearchTerm || hasCategory;
+
+  const categoryChips = useMemo(
+    () => buildCategoryFilters(usedCategories),
+    [usedCategories]
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchInput), SEARCH_DEBOUNCE_MS);
@@ -100,13 +118,17 @@ export default function BillingScreen() {
   useEffect(() => {
     let cancelled = false;
 
-    if (!hasSearchTerm) {
+    if (!browsing) {
       setResults([]);
       return;
     }
 
     setSearching(true);
-    listProducts({ search: debouncedSearch, limit: SEARCH_RESULT_LIMIT })
+    listProducts({
+      search: debouncedSearch,
+      category: hasCategory ? category : null,
+      limit: SEARCH_RESULT_LIMIT,
+    })
       .then((rows) => {
         if (cancelled) return;
         setResults(rows);
@@ -127,7 +149,7 @@ export default function BillingScreen() {
     return () => {
       cancelled = true;
     };
-  }, [debouncedSearch, hasSearchTerm]);
+  }, [debouncedSearch, browsing, hasCategory, category]);
 
   const refreshStock = useCallback(async () => {
     const ids = useCartStore.getState().lines.map((line) => line.productId);
@@ -152,10 +174,18 @@ export default function BillingScreen() {
   }, []);
 
   // Stock moves while a bill is open — another sale, or a manual adjustment on
-  // the Inventory tab. Re-read it whenever this screen comes back into view.
+  // the Inventory tab. Re-read it whenever this screen comes back into view,
+  // along with the categories actually in use, which change as products are
+  // added or edited on that same trip.
   useFocusEffect(
     useCallback(() => {
       refreshStock();
+      listUsedCategories()
+        .then(setUsedCategories)
+        .catch(() => {
+          // The fixed list still renders without this; an unreachable orphan
+          // category is not worth an error message over the bill.
+        });
     }, [refreshStock])
   );
 
@@ -250,6 +280,12 @@ export default function BillingScreen() {
       ]
     );
   }, [clear]);
+
+  const backToBill = useCallback(() => {
+    setSearchInput('');
+    setDebouncedSearch('');
+    setCategory(ALL_CATEGORIES);
+  }, []);
 
   const handleBlurField = useCallback((field: CustomerField) => {
     setTouched((current) => ({ ...current, [field]: true }));
@@ -360,7 +396,7 @@ export default function BillingScreen() {
     }
   }, [customerValidation.canGenerate, lines, stockById, writeBill]);
 
-  const showResults = step === 'items' && hasSearchTerm;
+  const showResults = step === 'items' && browsing;
 
   return (
     <KeyboardAvoidingView
@@ -369,6 +405,7 @@ export default function BillingScreen() {
       <StepSwitch step={step} onChange={setStep} customerDone={customerValidation.canGenerate} />
 
       {step === 'items' ? (
+        <>
         <View style={styles.searchBar}>
           <Ionicons name="search" size={20} color={Colors.textMuted} />
           <TextInput
@@ -391,6 +428,33 @@ export default function BillingScreen() {
             </Pressable>
           ) : null}
         </View>
+
+        {/* Browsing by category, so the counter does not require typing a
+            search for every item. Same chip list as Inventory — including any
+            category present in the data but no longer on the fixed list, or
+            those products would be unreachable here too. */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}>
+          {categoryChips.map((chip) => {
+            const active = category === chip;
+            return (
+              <Pressable
+                key={chip}
+                onPress={() => setCategory(chip)}
+                style={[styles.chip, active && styles.chipActive]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={
+                  chip === ALL_CATEGORIES ? 'Show the bill' : `Browse ${chip}`
+                }>
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>{chip}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+        </>
       ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -422,6 +486,8 @@ export default function BillingScreen() {
           inCart={inCart}
           onAdd={handleAdd}
           term={debouncedSearch}
+          category={hasCategory ? category : null}
+          onReset={backToBill}
         />
       ) : (
         <Cart
@@ -505,13 +571,16 @@ export default function BillingScreen() {
         </Pressable>
       ) : null}
 
+      {/* One way back to the bill, whichever way the browsing started — a
+          typed search, a category chip, or both. Leaving the user to work out
+          that they must clear two separate things would be needless. */}
       {showResults && lines.length > 0 ? (
         <Pressable
           style={styles.viewCartHint}
-          onPress={() => setSearchInput('')}
+          onPress={backToBill}
           accessibilityRole="button"
-          accessibilityLabel="Clear the search to see the bill">
-          <Text style={styles.viewCartHintText}>Clear search to see the bill</Text>
+          accessibilityLabel="Back to the bill">
+          <Text style={styles.viewCartHintText}>Back to the bill</Text>
         </Pressable>
       ) : null}
     </KeyboardAvoidingView>
@@ -565,9 +634,12 @@ type SearchResultsProps = {
   inCart: Map<number, number>;
   onAdd: (product: Product) => void;
   term: string;
+  /** The category being browsed, or null when only a search is in force. */
+  category: string | null;
+  onReset: () => void;
 };
 
-function SearchResults({ results, searching, inCart, onAdd, term }: SearchResultsProps) {
+function SearchResults({ results, searching, inCart, onAdd, term, category, onReset }: SearchResultsProps) {
   if (searching && results.length === 0) {
     return (
       <View style={styles.centered}>
@@ -580,10 +652,21 @@ function SearchResults({ results, searching, inCart, onAdd, term }: SearchResult
     return (
       <View style={styles.centered}>
         <Ionicons name="search" size={40} color={Colors.border} />
-        <Text style={styles.emptyTitle}>Nothing matches “{term}”</Text>
-        <Text style={styles.emptyBody}>
-          Try part of the name, brand, model number or HSN code.
+        <Text style={styles.emptyTitle}>
+          {term.trim() && category
+            ? `No ${category} product matches “${term.trim()}”`
+            : term.trim()
+              ? `Nothing matches “${term.trim()}”`
+              : `No products in ${category}`}
         </Text>
+        <Text style={styles.emptyBody}>
+          {term.trim()
+            ? 'Try part of the name, brand, model number or HSN code.'
+            : 'Add one on the Inventory tab, or pick another category.'}
+        </Text>
+        <Pressable onPress={onReset} accessibilityRole="button">
+          <Text style={styles.viewCartHintText}>Back to the bill</Text>
+        </Pressable>
       </View>
     );
   }
@@ -744,6 +827,21 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   searchInput: { flex: 1, fontSize: FontSizes.body, color: Colors.text },
+
+  chipRow: { gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm },
+  chip: {
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    minHeight: Spacing.minTapTarget - 8,
+    justifyContent: 'center',
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  chipActive: { backgroundColor: Colors.brand, borderColor: Colors.brand },
+  chipText: { fontSize: FontSizes.small, color: Colors.textMuted, fontWeight: '600' },
+  chipTextActive: { color: '#FFFFFF' },
   error: {
     marginHorizontal: Spacing.md,
     marginBottom: Spacing.sm,

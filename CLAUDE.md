@@ -355,6 +355,16 @@ confirmation of the shop's existing signage/branding.
   caller can tell "these are the shop's details" from "these are the compiled
   placeholders" — the difference between a correct bill header and one reading
   `PLACEHOLDER_ADDRESS_LINE_1`.
+- **The category chip list has one definition, in `lib/categories.ts`.** Both
+  Inventory and Billing show it, and two copies of the rule would drift. The
+  rule itself is the interesting part: the chips are the fixed list **plus any
+  category actually present in the data**, because filtering has to cover what
+  is really stored — a product in a retired or renamed category would otherwise
+  be invisible under every chip including its own, and so unbillable.
+- **On Billing, a category chip and a typed search both mean "browsing".** They
+  combine in the query, and one control (`backToBill`) clears both. Leaving the
+  user to work out that two separate things need clearing to see the bill again
+  would be needless.
 - **`lib/billDraft.ts` is the only thing that turns a cart into a bill.** It is
   a pure function, so what gets written is checkable without a screen or a
   database, and both the totals shown and the totals stored come from the same

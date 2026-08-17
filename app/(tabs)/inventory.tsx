@@ -15,7 +15,7 @@ import {
 import ProductCard from '@/components/ProductCard';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { listProducts, listUsedCategories, type Product } from '@/db/products';
-import { PRODUCT_CATEGORIES } from '@/db/schema';
+import { ALL_CATEGORIES, buildCategoryFilters } from '@/lib/categories';
 
 /**
  * Inventory list (T2.1) with stock-state highlighting (T2.2).
@@ -24,26 +24,11 @@ import { PRODUCT_CATEGORIES } from '@/db/schema';
  * open this screen already filtered (T5.4).
  */
 
-const ALL = 'All';
-
 /** Keystrokes are debounced so a long product list is not re-queried per letter. */
 const SEARCH_DEBOUNCE_MS = 250;
 
-/**
- * Filter chips = the fixed category list, plus any category actually present in
- * the database that is not on that list.
- *
- * Adding a product uses the fixed dropdown only. But filtering must cover what
- * is really stored, otherwise products in a retired or renamed category become
- * unreachable from this screen — invisible under every chip including the one
- * they belong to. That can happen after the category list is edited (as it was
- * when "Wiring & Electrical" was introduced) or after restoring an old backup.
- */
-function buildFilterChips(usedCategories: string[]): string[] {
-  const fixed = [...PRODUCT_CATEGORIES] as string[];
-  const orphans = usedCategories.filter((category) => !fixed.includes(category));
-  return [ALL, ...fixed, ...orphans];
-}
+// The chip list is shared with the Billing screen — see lib/categories.ts.
+const ALL = ALL_CATEGORIES;
 
 export default function InventoryScreen() {
   const params = useLocalSearchParams<{ filter?: string; at?: string }>();
@@ -57,7 +42,7 @@ export default function InventoryScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const filterChips = useMemo(() => buildFilterChips(usedCategories), [usedCategories]);
+  const filterChips = useMemo(() => buildCategoryFilters(usedCategories), [usedCategories]);
 
   /**
    * Respond to the Dashboard opening this screen pre-filtered (T5.4).
