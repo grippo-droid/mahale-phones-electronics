@@ -30,7 +30,6 @@ import { selectBusiness, useSettingsStore } from '@/store/settings';
  * cached. These are counts over a few hundred rows at most; a stale figure on
  * the screen the owner checks first would cost more than the query does.
  *
- * The tappable low-stock banner is T5.4.
  */
 
 /** Frontend Spec 2.1 — the last five bills. */
@@ -100,6 +99,7 @@ export default function DashboardScreen() {
   }, [load]);
 
   const shopName = business.name.startsWith('PLACEHOLDER') ? 'Your shop' : business.name;
+  const lowStock = stats?.lowStock ?? 0;
 
   if (loading && !stats) {
     return (
@@ -172,20 +172,32 @@ export default function DashboardScreen() {
         </View>
       </Pressable>
 
-      <View style={styles.statRow}>
-        <StatCard
-          icon="receipt"
-          label="Bills today"
-          value={String(stats?.todayBills ?? 0)}
-          tone="neutral"
-        />
-        <StatCard
-          icon="alert-circle"
-          label="Low stock"
-          value={String(stats?.lowStock ?? 0)}
-          tone={stats && stats.lowStock > 0 ? 'warning' : 'neutral'}
-        />
-      </View>
+      {/* Shown only when something is actually low. A permanent "Low stock: 0"
+          would be one more thing to read past every day, and the absence of the
+          banner already says the same thing. */}
+      {lowStock > 0 ? (
+        <Pressable
+          style={({ pressed }) => [styles.lowBanner, pressed && styles.lowBannerPressed]}
+          onPress={() =>
+            // `at` makes each tap a distinct navigation, so the filter is
+            // re-applied even if it was switched off by hand last time.
+            router.push({
+              pathname: '/inventory',
+              params: { filter: 'low', at: String(Date.now()) },
+            })
+          }
+          accessibilityRole="button"
+          accessibilityLabel={`${lowStock} ${lowStock === 1 ? 'item needs' : 'items need'} restocking. Open the inventory filtered to them.`}>
+          <Ionicons name="alert-circle" size={24} color={Colors.lowStock} />
+          <View style={styles.lowBannerText}>
+            <Text style={styles.lowBannerTitle}>
+              {lowStock} {lowStock === 1 ? 'item needs' : 'items need'} restocking
+            </Text>
+            <Text style={styles.lowBannerSub}>Tap to see them</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={Colors.lowStock} />
+        </Pressable>
+      ) : null}
 
       <View style={styles.monthRow}>
         <Text style={styles.monthLabel}>
@@ -213,13 +225,6 @@ export default function DashboardScreen() {
 
 // ---------------------------------------------------------------------------
 
-type StatCardProps = {
-  icon: keyof typeof Ionicons.glyphMap;
-  label: string;
-  value: string;
-  tone: 'neutral' | 'warning';
-};
-
 function RecentBillRow({ bill }: { bill: BillRow }) {
   return (
     <Pressable
@@ -238,21 +243,6 @@ function RecentBillRow({ bill }: { bill: BillRow }) {
       <Text style={styles.billTotal}>{formatRupees(bill.grand_total)}</Text>
       <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
     </Pressable>
-  );
-}
-
-function StatCard({ icon, label, value, tone }: StatCardProps) {
-  const warning = tone === 'warning';
-  return (
-    <View style={[styles.card, warning && styles.cardWarning]}>
-      <Ionicons
-        name={icon}
-        size={22}
-        color={warning ? Colors.lowStock : Colors.textMuted}
-      />
-      <Text style={[styles.cardValue, warning && styles.cardValueWarning]}>{value}</Text>
-      <Text style={styles.cardLabel}>{label}</Text>
-    </View>
   );
 }
 
@@ -326,25 +316,21 @@ const styles = StyleSheet.create({
   billMeta: { fontSize: FontSizes.small, color: Colors.textMuted },
   billTotal: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text, fontVariant: ['tabular-nums'] },
 
-  statRow: { flexDirection: 'row', gap: Spacing.md },
-  card: {
-    flex: 1,
-    gap: Spacing.xs,
+  lowBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
     padding: Spacing.md,
+    minHeight: Spacing.minTapTarget,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.surface,
+    borderColor: Colors.lowStock,
+    backgroundColor: '#FFF6E5',
   },
-  cardWarning: { borderColor: Colors.lowStock, backgroundColor: '#FFF6E5' },
-  cardValue: {
-    fontSize: FontSizes.heading,
-    fontWeight: '700',
-    color: Colors.text,
-    fontVariant: ['tabular-nums'],
-  },
-  cardValueWarning: { color: Colors.lowStock },
-  cardLabel: { fontSize: FontSizes.small, color: Colors.textMuted },
+  lowBannerPressed: { backgroundColor: '#FDEBCD' },
+  lowBannerText: { flex: 1 },
+  lowBannerTitle: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.lowStock },
+  lowBannerSub: { fontSize: FontSizes.small, color: Colors.lowStock },
 
   monthRow: {
     flexDirection: 'row',

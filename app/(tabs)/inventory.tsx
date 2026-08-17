@@ -46,7 +46,7 @@ function buildFilterChips(usedCategories: string[]): string[] {
 }
 
 export default function InventoryScreen() {
-  const params = useLocalSearchParams<{ filter?: string }>();
+  const params = useLocalSearchParams<{ filter?: string; at?: string }>();
 
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -59,10 +59,21 @@ export default function InventoryScreen() {
 
   const filterChips = useMemo(() => buildFilterChips(usedCategories), [usedCategories]);
 
-  // Respond to the Dashboard opening this screen pre-filtered.
+  /**
+   * Respond to the Dashboard opening this screen pre-filtered (T5.4).
+   *
+   * Keyed on `at` as well as `filter` because the value alone does not change
+   * between two taps of the same banner: turn the filter off by hand, go back
+   * and tap it again, and an effect watching only `filter` would not re-run —
+   * the banner would appear to do nothing.
+   *
+   * It only ever switches the filter ON. Arriving at this tab with no parameter
+   * is just the owner opening Inventory, and that should not silently undo a
+   * filter they set themselves.
+   */
   useEffect(() => {
-    setLowStockOnly(params.filter === 'low');
-  }, [params.filter]);
+    if (params.filter === 'low') setLowStockOnly(true);
+  }, [params.filter, params.at]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchInput), SEARCH_DEBOUNCE_MS);
