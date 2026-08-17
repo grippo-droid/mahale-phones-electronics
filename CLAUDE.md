@@ -355,12 +355,46 @@ confirmation of the shop's existing signage/branding.
   caller can tell "these are the shop's details" from "these are the compiled
   placeholders" — the difference between a correct bill header and one reading
   `PLACEHOLDER_ADDRESS_LINE_1`.
+- **A scrolling list in a flex column needs `flex: 1`, or it overflows.** A
+  `FlatList`/`ScrollView` with no flex sizes itself to its content and grows
+  past the column, which put rows underneath the Billing screen's pinned
+  summary bar. Every list on that screen carries `styles.list` (`flex: 1`) and
+  `styles.listContent` (bottom padding to clear the bar and the buttons below
+  it). A horizontal `ScrollView` in a column needs `flexGrow: 0` for the
+  mirror-image reason — otherwise it claims vertical space it does not need.
+- **"Frequently sold" is ranked by UNITS, over 90 days, top 12.** Units rather
+  than bill count: the list exists to save taps at a counter, and that is
+  decided by what moves in volume — ten bulbs on one bill beats one camera on
+  ten bills. Ranking by bill count would promote big-ticket items, which are
+  exactly the ones worth searching for deliberately. 90 days rather than 30
+  (one festival week would dominate) or all-time (whatever sold in the first
+  month would stay pinned forever).
+- **The quick list has a fallback ladder, and always says which rung it is on.**
+  90 days if at least 5 distinct products sold in it; otherwise all-time if
+  anything ever sold; otherwise the catalogue grouped by category. An empty
+  "Frequently sold" heading on a new shop would be worse than not having the
+  feature. The caption names the basis, so a ranking is never presented without
+  saying what it is a ranking of.
+- **It is computed from `bill_items`, never from a counter on `products`.** No
+  extra bookkeeping to keep in step, and it survives a backup restore. A
+  `bill_items` row whose product was deleted has a NULL `product_id` and is
+  dropped by the join — a product that no longer exists cannot be offered,
+  while the bill it appeared on stays intact.
+- **Out-of-stock products stay in the quick list, showing their stock.**
+  Overselling is allowed everywhere else; hiding a product because the recorded
+  count says zero would contradict that. The stock figure makes the tap an
+  informed one.
 - **The category chip list has one definition, in `lib/categories.ts`.** Both
   Inventory and Billing show it, and two copies of the rule would drift. The
   rule itself is the interesting part: the chips are the fixed list **plus any
   category actually present in the data**, because filtering has to cover what
   is really stored — a product in a retired or renamed category would otherwise
   be invisible under every chip including its own, and so unbillable.
+- **The chip row is also rendered in one place, `components/CategoryChips.tsx`.**
+  T3.7 shared which chips to show but left both screens drawing them, and the
+  copies drifted exactly as expected: the T3.8 layout fix landed on Billing and
+  left Inventory's last chip clipped. Sharing the rule without sharing the
+  rendering was half a job.
 - **On Billing, a category chip and a typed search both mean "browsing".** They
   combine in the query, and one control (`backToBill`) clears both. Leaving the
   user to work out that two separate things need clearing to see the bill again

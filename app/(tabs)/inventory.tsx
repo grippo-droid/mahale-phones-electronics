@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import CategoryChips from '@/components/CategoryChips';
 import ProductCard from '@/components/ProductCard';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { listProducts, listUsedCategories, type Product } from '@/db/products';
@@ -128,24 +129,7 @@ export default function InventoryScreen() {
         ) : null}
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chipRow}>
-        {filterChips.map((chip) => {
-          const active = category === chip;
-          return (
-            <Pressable
-              key={chip}
-              onPress={() => setCategory(chip)}
-              style={[styles.chip, active && styles.chipActive]}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}>
-              <Text style={[styles.chipText, active && styles.chipTextActive]}>{chip}</Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+      <CategoryChips chips={filterChips} selected={category} onSelect={setCategory} />
 
       <Pressable
         onPress={() => setLowStockOnly((value) => !value)}
@@ -287,18 +271,6 @@ const styles = StyleSheet.create({
     minHeight: Spacing.minTapTarget,
   },
   searchInput: { flex: 1, fontSize: FontSizes.body, color: Colors.text, paddingVertical: Spacing.sm },
-  chipRow: { paddingHorizontal: Spacing.md, gap: Spacing.sm, paddingBottom: Spacing.sm },
-  chip: {
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.background,
-  },
-  chipActive: { backgroundColor: Colors.brand, borderColor: Colors.brand },
-  chipText: { fontSize: FontSizes.small, color: Colors.textMuted, fontWeight: '600' },
-  chipTextActive: { color: '#FFFFFF' },
   lowToggle: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -6,9 +6,9 @@
 
 **How to use this:** Hand these one at a time, roughly in order. Each ticket is scoped to be independently buildable and testable. Check off as completed.
 
-**Status:** 35 of 59 tickets. Phases 0–3 complete; Phase 4 complete except
+**Status:** 36 of 59 tickets. Phases 0–3 complete; Phase 4 complete except
 Bluetooth printing (T4.5–T4.7, blocked); Phase 5 half done (T5.1–T5.4). Two tickets added to
-Phase 3 at the owner's request: T3.7 (done) and T3.8.
+Phase 3 at the owner's request, both done: T3.7 and T3.8.
 
 The app takes a sale end to end — search stock, build a cart, capture the
 customer, compute GST, write a numbered bill that decrements inventory, then
@@ -66,7 +66,7 @@ render it as a GST invoice to share on WhatsApp or print.
 - [x] **T3.5** — Build live GST/total summary panel on Billing screen.
 - [x] **T3.6** — Wire up "Generate Bill": write bill + bill_items to DB, decrement product stock.
 - [x] **T3.7** — Add category filter chips to the Billing screen, so products can be browsed by category instead of always typing a search. *(Added after Phase 5 began, at the owner's request.)*
-- [ ] **T3.8** — Add a "Frequently sold" section shown by default on the Billing screen: top 12 products by units sold over the last 90 days, falling back to all-time and then to all products grouped by category when there is not enough sales history. Out-of-stock items are included, with their stock shown.
+- [x] **T3.8** — Add a "Frequently sold" section shown by default on the Billing screen: top 12 products by units sold over the last 90 days, falling back to all-time and then to all products grouped by category when there is not enough sales history. Out-of-stock items are included, with their stock shown.
 
 ## Phase 4 — Bill Output (PDF, Share, Print)
 

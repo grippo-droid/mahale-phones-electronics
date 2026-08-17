@@ -16,11 +16,21 @@ import {
 } from 'react-native';
 
 import BillItemRow from '@/components/BillItemRow';
+import CategoryChips from '@/components/CategoryChips';
 import CustomerDetailsForm from '@/components/CustomerDetailsForm';
 import GstSummary from '@/components/GstSummary';
+import QuickPickList, { type QuickPickSection } from '@/components/QuickPickList';
+import ProductPickRow from '@/components/ProductPickRow';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { createBill } from '@/db/bills';
-import { getProductsByIds, listProducts, listUsedCategories, type Product } from '@/db/products';
+import {
+  FREQUENTLY_SOLD_WINDOW_DAYS,
+  getFrequentlySold,
+  getProductsByIds,
+  listProducts,
+  listUsedCategories,
+  type Product,
+} from '@/db/products';
 import { ALL_CATEGORIES, buildCategoryFilters } from '@/lib/categories';
 import { buildNewBill, findDeletedProducts, findOversells } from '@/lib/billDraft';
 import { resolveSupplyType, validateCustomer, type CustomerField } from '@/lib/customer';
@@ -63,6 +73,12 @@ import {
 const SEARCH_DEBOUNCE_MS = 250;
 const SEARCH_RESULT_LIMIT = 40;
 
+/** How many products the catalogue fallback shows when nothing has sold yet. */
+const CATALOGUE_FALLBACK_LIMIT = 60;
+
+type QuickPick = { sections: QuickPickSection[] };
+const EMPTY_QUICK_PICK: QuickPick = { sections: [] };
+
 /**
  * Used only to put a number on screen before the customer's state is known.
  * Most sales are local, so this is the likelier of the two — but see the note on
@@ -79,6 +95,7 @@ export default function BillingScreen() {
   const [generating, setGenerating] = useState(false);
   const [category, setCategory] = useState<string>(ALL_CATEGORIES);
   const [usedCategories, setUsedCategories] = useState<string[]>([]);
+  const [quickPick, setQuickPick] = useState<QuickPick>(EMPTY_QUICK_PICK);
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [results, setResults] = useState<Product[]>([]);
@@ -108,6 +125,59 @@ export default function BillingScreen() {
     () => buildCategoryFilters(usedCategories),
     [usedCategories]
   );
+
+  /**
+   * What to offer before anything is searched for (T3.8): the frequently sold
+   * products, or the catalogue by category when there is no usable history.
+   *
+   * Loaded on focus rather than on every keystroke — the ranking only moves
+   * when a bill is generated, and this screen is where that happens.
+   */
+  const loadQuickPick = useCallback(async () => {
+    try {
+      const frequent = await getFrequentlySold();
+
+      if (frequent.source !== 'none') {
+        setQuickPick({
+          sections: [
+            {
+              title: 'Frequently sold',
+              caption:
+                frequent.source === 'recent'
+                  ? `Most sold in the last ${FREQUENTLY_SOLD_WINDOW_DAYS} days`
+                  : 'Most sold so far — there is not much history yet',
+              products: frequent.products,
+            },
+          ],
+        });
+        return;
+      }
+
+      // Nothing has ever sold. Show the catalogue instead of an empty heading:
+      // on a shop's first day the quick list is the whole point of the screen.
+      const all = await listProducts({ limit: CATALOGUE_FALLBACK_LIMIT });
+      const byCategory = new Map<string, Product[]>();
+      for (const product of all) {
+        const bucket = byCategory.get(product.category) ?? [];
+        bucket.push(product);
+        byCategory.set(product.category, bucket);
+      }
+
+      const sections = [...byCategory.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([title, products], index) => ({
+          title,
+          // Said once, on the first section, rather than repeated per category.
+          caption: index === 0 ? 'No sales history yet — everything in stock' : null,
+          products,
+        }));
+      setQuickPick({ sections });
+    } catch {
+      // The search box and the chips still work without this; a failed quick
+      // list must not stop a sale.
+      setQuickPick(EMPTY_QUICK_PICK);
+    }
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchInput), SEARCH_DEBOUNCE_MS);
@@ -180,13 +250,14 @@ export default function BillingScreen() {
   useFocusEffect(
     useCallback(() => {
       refreshStock();
+      loadQuickPick();
       listUsedCategories()
         .then(setUsedCategories)
         .catch(() => {
           // The fixed list still renders without this; an unreachable orphan
           // category is not worth an error message over the bill.
         });
-    }, [refreshStock])
+    }, [refreshStock, loadQuickPick])
   );
 
   const inCart = useMemo(
@@ -433,27 +504,14 @@ export default function BillingScreen() {
             search for every item. Same chip list as Inventory — including any
             category present in the data but no longer on the fixed list, or
             those products would be unreachable here too. */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}>
-          {categoryChips.map((chip) => {
-            const active = category === chip;
-            return (
-              <Pressable
-                key={chip}
-                onPress={() => setCategory(chip)}
-                style={[styles.chip, active && styles.chipActive]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={
-                  chip === ALL_CATEGORIES ? 'Show the bill' : `Browse ${chip}`
-                }>
-                <Text style={[styles.chipText, active && styles.chipTextActive]}>{chip}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
+        <CategoryChips
+          chips={categoryChips}
+          selected={category}
+          onSelect={setCategory}
+          // On this screen "All" means "stop browsing and show the bill", which
+          // is not what it means on Inventory.
+          allLabel="Show the bill"
+        />
         </>
       ) : null}
 
@@ -494,6 +552,9 @@ export default function BillingScreen() {
           lines={lines}
           stockById={stockById}
           supplyType={supplyType ?? PROVISIONAL_SUPPLY_TYPE}
+          quickPick={quickPick}
+          inCart={inCart}
+          onAdd={handleAdd}
           onChangeQty={setQty}
           onStep={changeQty}
           onRemove={removeLine}
@@ -674,53 +735,17 @@ function SearchResults({ results, searching, inCart, onAdd, term, category, onRe
   return (
     <FlatList
       data={results}
+      style={styles.list}
+      contentContainerStyle={styles.listContent}
       keyExtractor={(product) => String(product.id)}
       keyboardShouldPersistTaps="handled"
       renderItem={({ item }) => (
-        <SearchResultRow product={item} qtyInCart={inCart.get(item.id)} onAdd={onAdd} />
+        // The same row the quick-pick list uses: tapping a search result and
+        // tapping a frequently-sold product are the same action, so they must
+        // not look like two different ones.
+        <ProductPickRow product={item} qtyInCart={inCart.get(item.id)} onAdd={onAdd} />
       )}
     />
-  );
-}
-
-type SearchResultRowProps = {
-  product: Product;
-  qtyInCart: number | undefined;
-  onAdd: (product: Product) => void;
-};
-
-function SearchResultRow({ product, qtyInCart, onAdd }: SearchResultRowProps) {
-  const out = product.stock_qty <= 0;
-
-  return (
-    <Pressable
-      style={({ pressed }) => [styles.resultRow, pressed && styles.resultRowPressed]}
-      onPress={() => onAdd(product)}
-      accessibilityRole="button"
-      accessibilityLabel={`Add ${product.name} to the bill`}>
-      <View style={styles.resultMain}>
-        <Text style={styles.resultName} numberOfLines={2}>
-          {product.name}
-        </Text>
-        <Text style={[styles.resultStock, out && styles.resultStockOut]}>
-          {product.stock_qty} in stock
-          {/* Selling past zero is allowed; the cart line spells out the effect. */}
-          {out ? ' — can still be billed' : ''}
-        </Text>
-      </View>
-
-      <View style={styles.resultSide}>
-        <Text style={styles.resultPrice}>{formatRupees(product.unit_price)}</Text>
-        {qtyInCart ? (
-          <View style={styles.inCartTag}>
-            <Ionicons name="checkmark" size={12} color="#FFFFFF" />
-            <Text style={styles.inCartText}>{qtyInCart} on bill</Text>
-          </View>
-        ) : (
-          <Ionicons name="add-circle" size={26} color={Colors.brand} />
-        )}
-      </View>
-    </Pressable>
   );
 }
 
@@ -730,27 +755,73 @@ type CartProps = {
   lines: CartLine[];
   stockById: Record<number, number>;
   supplyType: SupplyType;
+  quickPick: QuickPick;
+  inCart: Map<number, number>;
+  onAdd: (product: Product) => void;
   onChangeQty: (productId: number, qty: number) => void;
   onStep: (productId: number, delta: number) => void;
   onRemove: (productId: number) => void;
 };
 
-function Cart({ lines, stockById, supplyType, onChangeQty, onStep, onRemove }: CartProps) {
+/**
+ * The bill, with the quick-pick list attached (T3.8).
+ *
+ * On an empty bill the quick picks ARE the screen — there is nothing else to
+ * look at, and a counter starting a sale wants the common items under the thumb
+ * immediately. Once the bill has lines, they move below it: what has been added
+ * is what needs checking, and the picks become a way to add one more.
+ */
+function Cart({
+  lines,
+  stockById,
+  supplyType,
+  quickPick,
+  inCart,
+  onAdd,
+  onChangeQty,
+  onStep,
+  onRemove,
+}: CartProps) {
+  const picks = (separated: boolean) =>
+    quickPick.sections.length > 0 ? (
+      <QuickPickList
+        sections={quickPick.sections}
+        inCart={inCart}
+        onAdd={onAdd}
+        separated={separated}
+      />
+    ) : null;
+
   if (lines.length === 0) {
     return (
-      <View style={styles.centered}>
-        <Ionicons name="receipt-outline" size={48} color={Colors.border} />
-        <Text style={styles.emptyTitle}>No items on this bill yet</Text>
-        <Text style={styles.emptyBody}>
-          Search above to find a product, then tap it to add it to the bill.
-        </Text>
-      </View>
+      <FlatList
+        data={[]}
+        renderItem={null}
+        style={styles.list}
+        contentContainerStyle={styles.listContent}
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={
+          <View>
+            <View style={styles.emptyBillNote}>
+              <Ionicons name="receipt-outline" size={20} color={Colors.textMuted} />
+              <Text style={styles.emptyBody}>
+                {quickPick.sections.length > 0
+                  ? 'Nothing on this bill yet — tap a product below, search, or pick a category.'
+                  : 'No items on this bill yet. Search above to find a product.'}
+              </Text>
+            </View>
+            {picks(false)}
+          </View>
+        }
+      />
     );
   }
 
   return (
     <FlatList
       data={lines}
+      style={styles.list}
+      contentContainerStyle={styles.listContent}
       keyExtractor={(line) => String(line.productId)}
       keyboardShouldPersistTaps="handled"
       renderItem={({ item }) => (
@@ -764,9 +835,12 @@ function Cart({ lines, stockById, supplyType, onChangeQty, onStep, onRemove }: C
         />
       )}
       ListFooterComponent={
-        <Text style={styles.nextStepNote}>
-          The GST breakdown and “Generate Bill” come after the customer details.
-        </Text>
+        <View>
+          {picks(true)}
+          <Text style={styles.nextStepNote}>
+            The GST breakdown and “Generate Bill” come after the customer details.
+          </Text>
+        </View>
       }
     />
   );
@@ -798,7 +872,7 @@ const styles = StyleSheet.create({
   stepTabTextActive: { color: Colors.brand, fontWeight: '700' },
 
   customerScroll: { flex: 1 },
-  customerScrollContent: { paddingBottom: Spacing.lg },
+  customerScrollContent: { paddingBottom: Spacing.xl },
 
   primaryButton: {
     flexDirection: 'row',
@@ -828,20 +902,6 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: FontSizes.body, color: Colors.text },
 
-  chipRow: { gap: Spacing.sm, paddingHorizontal: Spacing.md, paddingBottom: Spacing.sm },
-  chip: {
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.md,
-    minHeight: Spacing.minTapTarget - 8,
-    justifyContent: 'center',
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.background,
-  },
-  chipActive: { backgroundColor: Colors.brand, borderColor: Colors.brand },
-  chipText: { fontSize: FontSizes.small, color: Colors.textMuted, fontWeight: '600' },
-  chipTextActive: { color: '#FFFFFF' },
   error: {
     marginHorizontal: Spacing.md,
     marginBottom: Spacing.sm,
@@ -856,35 +916,20 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   emptyTitle: { fontSize: FontSizes.title, fontWeight: '700', color: Colors.text, textAlign: 'center' },
+  emptyBillNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
   emptyBody: { fontSize: FontSizes.body, color: Colors.textMuted, textAlign: 'center' },
 
-  resultRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.md,
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    minHeight: Spacing.minTapTarget,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
-  },
-  resultRowPressed: { backgroundColor: Colors.surface },
-  resultMain: { flex: 1, gap: 2 },
-  resultName: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.text },
-  resultStock: { fontSize: FontSizes.small, color: Colors.textMuted },
-  resultStockOut: { color: Colors.outOfStock, fontWeight: '600' },
-  resultSide: { alignItems: 'flex-end', gap: Spacing.xs },
-  resultPrice: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text },
-  inCartTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    borderRadius: 999,
-    backgroundColor: Colors.inStock,
-    paddingVertical: 2,
-    paddingHorizontal: Spacing.sm,
-  },
-  inCartText: { color: '#FFFFFF', fontSize: FontSizes.small - 3, fontWeight: '700' },
+  // A FlatList with no flex sizes to its content and overflows the column,
+  // which is what put rows behind the pinned summary bar.
+  list: { flex: 1 },
+  /** Clears the pinned bar and the buttons beneath it. */
+  listContent: { paddingBottom: Spacing.xl },
 
   summaryBar: {
     flexDirection: 'row',

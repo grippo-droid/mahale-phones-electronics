@@ -169,6 +169,137 @@ export async function getProductsByIds(
   return rows.map((row) => decorate(row, globalThreshold));
 }
 
+// ---------------------------------------------------------------------------
+// Frequently sold (T3.8)
+// ---------------------------------------------------------------------------
+
+/** How far back "frequently sold" looks by default. */
+export const FREQUENTLY_SOLD_WINDOW_DAYS = 90;
+
+/** How many products the Billing screen offers as quick taps. */
+export const FREQUENTLY_SOLD_LIMIT = 12;
+
+/**
+ * How many distinct products must have sold in the window for it to be worth
+ * calling "frequently sold" rather than "the three things we happen to have
+ * sold". Below this the ladder widens to all-time.
+ */
+export const FREQUENTLY_SOLD_MIN_DISTINCT = 5;
+
+export type FrequentlySoldProduct = Product & {
+  /** Units sold over the window this was computed for. */
+  unitsSold: number;
+};
+
+/**
+ * Where a "frequently sold" list came from — the Billing screen labels it, so
+ * the shop owner is never shown a ranking without knowing what it is based on.
+ *
+ * `none` means there is no usable sales history at all; the caller should fall
+ * back to showing the catalogue.
+ */
+export type FrequentlySoldSource = 'recent' | 'all-time' | 'none';
+
+export type FrequentlySold = {
+  source: FrequentlySoldSource;
+  products: FrequentlySoldProduct[];
+};
+
+/**
+ * Products ranked by units sold, most first.
+ *
+ * Ranked by UNITS rather than by how many bills a product appeared on. The
+ * point of this list is to save taps at the counter, and that is decided by
+ * what moves in volume — ten bulbs on one bill beats one camera on ten bills.
+ * Ranking by bill count would promote big-ticket items, which are exactly the
+ * ones worth searching for deliberately.
+ *
+ * Reads `bill_items` rather than any running counter on `products`, so it stays
+ * correct with no extra bookkeeping and survives a backup restore.
+ *
+ * A `bill_items` row whose product was later deleted has a NULL `product_id`
+ * and is dropped by the join, which is right: a product that no longer exists
+ * cannot be offered as a quick tap.
+ *
+ * Out-of-stock products are deliberately INCLUDED. Overselling is allowed
+ * throughout the app, and hiding a product because the recorded count says zero
+ * would be inconsistent with that — the caller shows the stock figure so the
+ * tap is an informed one.
+ */
+export async function listFrequentlySold(
+  options: { sinceDays?: number | null; limit?: number } = {},
+  db: SQLiteDatabase = getDatabase()
+): Promise<FrequentlySoldProduct[]> {
+  const limit = options.limit ?? FREQUENTLY_SOLD_LIMIT;
+  const sinceDays = options.sinceDays ?? null;
+
+  const params: (string | number)[] = [];
+  let where = '';
+
+  if (sinceDays !== null) {
+    // Counted from the start of the local day `sinceDays` ago, so the window is
+    // whole days rather than cutting off mid-morning.
+    const from = new Date();
+    from.setDate(from.getDate() - sinceDays);
+    from.setHours(0, 0, 0, 0);
+    where = 'WHERE b.date >= ?';
+    params.push(from.toISOString());
+  }
+
+  params.push(limit);
+
+  const rows = await db.getAllAsync<ProductRow & { units_sold: number }>(
+    `SELECT p.*, SUM(bi.qty) AS units_sold
+       FROM bill_items bi
+       JOIN bills    b ON b.id = bi.bill_id
+       JOIN products p ON p.id = bi.product_id
+       ${where}
+      GROUP BY p.id
+      ORDER BY units_sold DESC, p.name COLLATE NOCASE ASC
+      LIMIT ?`,
+    params
+  );
+
+  const globalThreshold = await getGlobalLowStockThreshold(db);
+  return rows.map((row) => ({
+    ...decorate(row, globalThreshold),
+    unitsSold: row.units_sold,
+  }));
+}
+
+/**
+ * The list the Billing screen shows, with the fallback ladder applied.
+ *
+ * A new shop has no sales history, and a shop three weeks old has barely any.
+ * Showing an empty "Frequently sold" heading in either case would be worse than
+ * not having the feature, so:
+ *
+ *   1. the last 90 days, if enough distinct products sold in it;
+ *   2. otherwise all-time, if anything has ever sold;
+ *   3. otherwise nothing — the caller shows the catalogue instead.
+ *
+ * The window is deliberately not shorter: 30 days would let one festival week
+ * dominate the list, and a new shop would have almost nothing in it. It is
+ * deliberately not all-time by default either, or whatever sold in the first
+ * month would stay pinned there for good.
+ */
+export async function getFrequentlySold(
+  db: SQLiteDatabase = getDatabase()
+): Promise<FrequentlySold> {
+  const recent = await listFrequentlySold(
+    { sinceDays: FREQUENTLY_SOLD_WINDOW_DAYS, limit: FREQUENTLY_SOLD_LIMIT },
+    db
+  );
+  if (recent.length >= FREQUENTLY_SOLD_MIN_DISTINCT) {
+    return { source: 'recent', products: recent };
+  }
+
+  const allTime = await listFrequentlySold({ sinceDays: null, limit: FREQUENTLY_SOLD_LIMIT }, db);
+  if (allTime.length > 0) return { source: 'all-time', products: allTime };
+
+  return { source: 'none', products: [] };
+}
+
 /** Low-stock count for the Dashboard badge (T5.1). */
 export async function countLowStockProducts(
   db: SQLiteDatabase = getDatabase()
