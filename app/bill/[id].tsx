@@ -1,5 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -14,10 +15,16 @@ import {
 
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { stateCodeFor } from '@/constants/states';
-import { getBillById, type BillWithItems } from '@/db/bills';
+import { getBillById, setBillPdfPath, type BillWithItems } from '@/db/bills';
 import { formatDate, formatRupees } from '@/lib/format';
 import { rupeesInWords } from '@/lib/numberToWords';
-import { buildBillHtml, isInterStateBill, summariseStoredItems } from '@/lib/pdf';
+import {
+  buildBillHtml,
+  existingBillPdf,
+  generateBillPdf,
+  isInterStateBill,
+  summariseStoredItems,
+} from '@/lib/pdf';
 import { selectBusiness, useSettingsStore } from '@/store/settings';
 
 /**
@@ -42,9 +49,9 @@ import { selectBusiness, useSettingsStore } from '@/store/settings';
  * Both come from the same `bills`/`bill_items` rows, so they cannot disagree.
  * ---------------------------------------------------------------------------
  *
- * Share is T4.4 — that is where `generateBillPdf` produces an actual file to
- * hand to WhatsApp, and where the path is recorded on the bill. Bluetooth
- * thermal printing is T4.6.
+ * Sharing (T4.4) needs a real file, so that path does render the PDF through
+ * `generateBillPdf` and records it on the bill. Bluetooth thermal printing is
+ * T4.6.
  */
 
 export default function BillResultScreen() {
@@ -54,6 +61,7 @@ export default function BillResultScreen() {
   const [bill, setBill] = useState<BillWithItems | null>(null);
   const [loading, setLoading] = useState(true);
   const [preparingPdf, setPreparingPdf] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -85,6 +93,59 @@ export default function BillResultScreen() {
       cancelled = true;
     };
   }, [billId]);
+
+  /**
+   * Produces the PDF file, reusing one already on disk (T4.4).
+   *
+   * Sharing needs a real file, unlike printing — so this is where
+   * `generateBillPdf` is used, and where the resulting path is recorded on the
+   * bill so History can share it again without rendering a second time.
+   */
+  const preparePdf = useCallback(async (): Promise<string | null> => {
+    if (!bill) return null;
+
+    // A bill reopened from History already has one; a freshly generated bill
+    // may still have the file from a previous share.
+    const existing = bill.pdf_path ?? existingBillPdf(bill.invoice_number);
+    if (existing) return existing;
+
+    const path = await generateBillPdf(bill, business);
+    await setBillPdfPath(bill.id, path);
+    // Keep the in-memory bill in step, so a second share skips the render.
+    setBill((current) => (current ? { ...current, pdf_path: path } : current));
+    return path;
+  }, [bill, business]);
+
+  const shareBill = useCallback(async () => {
+    if (!bill) return;
+
+    setSharing(true);
+    setPdfError(null);
+    try {
+      if (!(await Sharing.isAvailableAsync())) {
+        Alert.alert('Sharing is not available', 'This device cannot open a share sheet.');
+        return;
+      }
+
+      const path = await preparePdf();
+      if (!path) return;
+
+      await Sharing.shareAsync(path, {
+        mimeType: 'application/pdf',
+        // Android names the chooser from this; iOS uses the UTI. Neither is
+        // the filename — that comes from the file itself, which is why it is
+        // saved as MPE-2026-27-0001.pdf rather than a random cache name.
+        dialogTitle: `Bill ${bill.invoice_number}`,
+        UTI: 'com.adobe.pdf',
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // The bill exists either way; only the copy of it failed.
+      setPdfError(`The bill is saved, but it could not be shared: ${message}`);
+    } finally {
+      setSharing(false);
+    }
+  }, [bill, preparePdf]);
 
   /**
    * Opens the Android print sheet, which renders the bill for preview and can
@@ -247,16 +308,36 @@ export default function BillResultScreen() {
           </View>
         ) : null}
 
-        <Text style={styles.footnote}>
-          Sharing on WhatsApp and thermal printing are added next.
-        </Text>
+        <Text style={styles.footnote}>Thermal printer support is added next.</Text>
       </ScrollView>
 
       <View style={styles.actions}>
+        {/* Share is the primary action: most bills go to the customer on
+            WhatsApp, and printing is the exception at this counter. */}
         <Pressable
           style={({ pressed }) => [
             styles.primaryButton,
             pressed && styles.primaryButtonPressed,
+            sharing && styles.busy,
+          ]}
+          onPress={shareBill}
+          disabled={sharing}
+          accessibilityRole="button"
+          accessibilityLabel="Share this bill">
+          {sharing ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Ionicons name="share-social" size={20} color="#FFFFFF" />
+          )}
+          <Text style={styles.primaryButtonText}>
+            {sharing ? 'Preparing…' : 'Share bill'}
+          </Text>
+        </Pressable>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.outlineButton,
+            pressed && styles.secondaryButtonPressed,
             preparingPdf && styles.busy,
           ]}
           onPress={openPdf}
@@ -264,12 +345,12 @@ export default function BillResultScreen() {
           accessibilityRole="button"
           accessibilityLabel="Open the printable bill">
           {preparingPdf ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={Colors.brand} />
           ) : (
-            <Ionicons name="document-text" size={20} color="#FFFFFF" />
+            <Ionicons name="print" size={20} color={Colors.brand} />
           )}
-          <Text style={styles.primaryButtonText}>
-            {preparingPdf ? 'Preparing…' : 'Open printable bill'}
+          <Text style={styles.outlineButtonText}>
+            {preparingPdf ? 'Preparing…' : 'Print'}
           </Text>
         </Pressable>
 
@@ -410,6 +491,17 @@ const styles = StyleSheet.create({
   primaryButtonPressed: { backgroundColor: Colors.brandDark },
   primaryButtonText: { color: '#FFFFFF', fontSize: FontSizes.body, fontWeight: '700' },
   busy: { opacity: 0.7 },
+  outlineButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    height: Spacing.minTapTarget + 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.brand,
+  },
+  outlineButtonText: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.brand },
   secondaryButton: {
     alignItems: 'center',
     justifyContent: 'center',

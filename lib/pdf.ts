@@ -281,6 +281,15 @@ export function renderBillHtml(
   th, td { padding: 5px 6px; border-bottom: 1px solid #ddd; }
   thead th { background: #f0f2f4; border-bottom: 1px solid #333; text-align: left;
              font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px; }
+
+  /* Pagination. A bill with enough lines runs past one A4 page, and the
+     defaults break it badly: the column headings appear only on page one, a
+     row can be sliced through the middle, and the totals block can end up
+     orphaned on a page of its own. */
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; break-inside: avoid; }
+  .foot { page-break-inside: avoid; break-inside: avoid; }
+  .sign { page-break-inside: avoid; break-inside: avoid; }
   td.r, th.r { text-align: right; }
   td.c, th.c { text-align: center; }
 
@@ -416,6 +425,50 @@ export function renderBillHtml(
 // Generating the file
 // ---------------------------------------------------------------------------
 
+/** Lookup table for base64 decoding, built once rather than per character. */
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const BASE64_LOOKUP = (() => {
+  const table = new Uint8Array(256).fill(255);
+  for (let i = 0; i < BASE64_ALPHABET.length; i++) {
+    table[BASE64_ALPHABET.charCodeAt(i)] = i;
+  }
+  return table;
+})();
+
+/**
+ * Decodes base64 into bytes.
+ *
+ * Written out rather than relying on `atob`, which is not guaranteed across
+ * JS engines, and on `Buffer`, which React Native does not provide.
+ */
+export function base64ToBytes(base64: string): Uint8Array {
+  let length = 0;
+  // Count the real characters first so the output is sized exactly, ignoring
+  // padding and any line breaks the encoder inserted.
+  for (let i = 0; i < base64.length; i++) {
+    if (BASE64_LOOKUP[base64.charCodeAt(i)] !== 255) length++;
+  }
+
+  const bytes = new Uint8Array(Math.floor((length * 3) / 4));
+  let accumulator = 0;
+  let bits = 0;
+  let out = 0;
+
+  for (let i = 0; i < base64.length; i++) {
+    const value = BASE64_LOOKUP[base64.charCodeAt(i)];
+    if (value === 255) continue;
+
+    accumulator = (accumulator << 6) | value;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes[out++] = (accumulator >> bits) & 0xff;
+    }
+  }
+
+  return bytes;
+}
+
 const MIME_BY_EXTENSION: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -485,23 +538,34 @@ export async function generateBillPdf(
 ): Promise<string> {
   const html = await buildBillHtml(bill, business);
 
+  // The bytes are asked for rather than the file being moved. `expo-print`
+  // writes its output to the *host* app's cache directory, which under Expo Go
+  // is outside this experience's sandbox — and `File.move`/`File.copy` validate
+  // READ permission against the sandbox, so moving that file is rejected with
+  // "Missing 'READ' permission for accessing the file". `base64` is encoded
+  // natively inside expo-print, so it never crosses that boundary.
   const printed = await Print.printToFileAsync({
     html,
     width: PAGE_WIDTH,
     height: PAGE_HEIGHT,
-    base64: false,
+    base64: true,
   });
+
+  if (!printed.base64) {
+    throw new Error('The bill was rendered but its contents could not be read back.');
+  }
 
   const directory = new Directory(Paths.document, BILL_DIRECTORY_NAME);
   if (!directory.exists) directory.create({ intermediates: true });
 
   const destination = new File(directory, `${invoiceNumberToFileName(bill.invoice_number)}.pdf`);
 
-  // Regenerating a bill (a reprint, or a retry after a failed share) must not
-  // fail on a file that is already there.
+  // Regenerating a bill (a reshare, or a retry after a failure) must not fail
+  // on a file that is already there.
   if (destination.exists) destination.delete();
+  destination.create();
+  destination.write(base64ToBytes(printed.base64));
 
-  new File(printed.uri).move(destination);
   return destination.uri;
 }
 

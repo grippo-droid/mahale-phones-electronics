@@ -263,6 +263,28 @@ confirmation of the shop's existing signage/branding.
   number is not a thing to warn about and allow. A GSTIN/state disagreement is
   serious but recoverable, and the owner may be mid-edit with one of the two
   already correct.
+- **Never `File.move()` or `File.copy()` a file another module wrote.**
+  `expo-file-system`'s `move`/`copy` validate READ permission on the *source*
+  against the app's scoped paths (`FileSystemPath.kt`). `expo-print` writes its
+  output to the **host** app's cache directory, which under Expo Go is outside
+  this experience's sandbox — so moving it fails with *"Missing 'READ'
+  permission for accessing the file"*. `generateBillPdf` therefore asks
+  `printToFileAsync` for `base64` (encoded natively inside expo-print, so it
+  never crosses the boundary) and writes the bytes into the document directory
+  itself, via `base64ToBytes`. Picking a logo is fine with `copy()` because the
+  source is a URI the system has granted access to.
+- **Printing takes HTML; sharing takes a file.** The two actions on the Bill
+  Result screen deliberately take different routes. Printing renders HTML
+  through the print sheet (see the crash note below). Sharing needs something on
+  disk to hand another app, so it calls `generateBillPdf`, records the path with
+  `setBillPdfPath`, and reuses it on a second share — `expo-sharing` passes the
+  file through a FileProvider, so it never hits the `{ uri }` bug.
+- **The invoice template sets its own pagination rules.** A bill long enough to
+  run past one A4 page breaks badly on browser defaults: column headings appear
+  only on page one, a row gets sliced through the middle, and the totals block
+  can be orphaned. Hence `thead { display: table-header-group }` and
+  `page-break-inside: avoid` (with the modern `break-inside` spelling) on rows,
+  the totals block and the signature block.
 - **Never call `Print.printAsync({ uri })` on Android — use `{ html }`.** The
   `uri` branch of expo-print's `PrintModule.kt` resumes its coroutine as soon as
   the job is handed to the system `PrintManager` (line ~70), and then resumes it
