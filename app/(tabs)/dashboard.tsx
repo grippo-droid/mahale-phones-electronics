@@ -1,8 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -14,6 +15,7 @@ import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { getSalesSummary } from '@/db/bills';
 import { countLowStockProducts } from '@/db/products';
 import { formatRupees } from '@/lib/format';
+import { selectItemCount, useCartStore } from '@/store/cart';
 import { selectBusiness, useSettingsStore } from '@/store/settings';
 
 /**
@@ -27,8 +29,7 @@ import { selectBusiness, useSettingsStore } from '@/store/settings';
  * cached. These are counts over a few hundred rows at most; a stale figure on
  * the screen the owner checks first would cost more than the query does.
  *
- * The "New Bill" button is T5.2, the recent bills list T5.3, and the tappable
- * low-stock banner T5.4.
+ * The recent bills list is T5.3 and the tappable low-stock banner T5.4.
  */
 
 type Stats = {
@@ -45,6 +46,7 @@ function startOfMonth(now: Date): Date {
 
 export default function DashboardScreen() {
   const business = useSettingsStore(selectBusiness);
+  const cartCount = useCartStore(selectItemCount);
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,6 +138,33 @@ export default function DashboardScreen() {
         </Text>
       </View>
 
+      {/* The most frequent action on the app, so it gets the largest target on
+          the screen and sits directly under the figure the owner came to see.
+
+          It says "Continue bill" when something is already in the cart. Tapping
+          a button marked "New Bill" and landing on a half-built bill from ten
+          minutes ago would look like a fault; naming it honestly costs nothing
+          and the cart is deliberately kept (see store/cart.ts). */}
+      <Pressable
+        style={({ pressed }) => [styles.newBill, pressed && styles.newBillPressed]}
+        onPress={() => router.navigate('/billing')}
+        accessibilityRole="button"
+        accessibilityLabel={
+          cartCount > 0
+            ? `Continue the bill in progress, ${cartCount} items`
+            : 'Start a new bill'
+        }>
+        <Ionicons name={cartCount > 0 ? 'arrow-forward-circle' : 'add-circle'} size={28} color="#FFFFFF" />
+        <View style={styles.newBillText}>
+          <Text style={styles.newBillLabel}>{cartCount > 0 ? 'Continue bill' : 'New Bill'}</Text>
+          {cartCount > 0 ? (
+            <Text style={styles.newBillSub}>
+              {cartCount} {cartCount === 1 ? 'item' : 'items'} on the bill
+            </Text>
+          ) : null}
+        </View>
+      </Pressable>
+
       <View style={styles.statRow}>
         <StatCard
           icon="receipt"
@@ -159,7 +188,7 @@ export default function DashboardScreen() {
       </View>
 
       <Text style={styles.footnote}>
-        The New Bill button, recent bills and the low-stock shortcut come next.
+        Recent bills and the low-stock shortcut come next.
       </Text>
     </ScrollView>
   );
@@ -226,6 +255,20 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   headlineSub: { fontSize: FontSizes.small, color: '#FFFFFF', opacity: 0.85 },
+
+  newBill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    minHeight: Spacing.minTapTarget + 24,
+    borderRadius: 12,
+    backgroundColor: Colors.inStock,
+  },
+  newBillPressed: { opacity: 0.85 },
+  newBillText: { flex: 1 },
+  newBillLabel: { fontSize: FontSizes.title, fontWeight: '700', color: '#FFFFFF' },
+  newBillSub: { fontSize: FontSizes.small, color: '#FFFFFF', opacity: 0.9 },
 
   statRow: { flexDirection: 'row', gap: Spacing.md },
   card: {
