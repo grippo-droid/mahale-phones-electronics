@@ -6,20 +6,24 @@
 
 **How to use this:** Hand these one at a time, roughly in order. Each ticket is scoped to be independently buildable and testable. Check off as completed.
 
-**Status:** Phases 0–3 complete (26 of 57 tickets). The app takes a sale end to
-end — search stock, build a cart, capture the customer, compute GST, and write a
-numbered bill that decrements inventory. Phase 4 is in progress at T4.1.
+**Status:** 31 of 57 tickets. Phases 0–3 complete; Phase 4 complete except
+Bluetooth printing (T4.5–T4.7, blocked); Phase 5 started at T5.1.
 
-Two things are needed before the app raises bills the shop actually gives out:
+The app takes a sale end to end — search stock, build a cart, capture the
+customer, compute GST, write a numbered bill that decrements inventory, then
+render it as a GST invoice to share on WhatsApp or print.
+
+**Waiting on the shop owner** (all enterable in Settings — no code change):
 
 - **Invoice numbering** — the real format, the reset policy and the starting
   number. Today's defaults (`MPE/{FY}/{SEQ}`, financial-year reset, starting at
   1) are placeholders. The starting number matters most: if a paper bill book is
-  part-used, starting at 1 reissues numbers customers already hold. T4.1 makes
-  these editable, but any bill raised before then keeps its number permanently.
-- **Remaining business details** — registered name, address, phone, email, bank
-  details and logo. These print on the invoice, so they bite from T4.2 onward.
-  GSTIN and state are confirmed already.
+  part-used, starting at 1 reissues numbers customers already hold, and any bill
+  raised before it is set keeps its number permanently.
+- **Remaining business details** — registered name, address, phone, email and
+  bank details. These print on the invoice, which currently has blank gaps where
+  they belong. GSTIN and state are confirmed.
+- **The Bluetooth thermal printer model** — blocks T4.5 and T4.7.
 
 ---
 
@@ -63,17 +67,17 @@ Two things are needed before the app raises bills the shop actually gives out:
 
 ## Phase 4 — Bill Output (PDF, Share, Print)
 
-- [ ] **T4.1** — Build business details config (Settings screen fields: name, GSTIN, address, state, phone, bank details, logo, invoice format) stored locally.
-- [ ] **T4.2** — Build `lib/pdf.ts`: HTML bill template → PDF via `expo-print`, using business details + bill data.
-- [ ] **T4.3** — Build Bill Result/Preview screen: show generated PDF.
-- [ ] **T4.4** — Wire up Share action via `expo-sharing`.
-- [ ] **T4.5** — Research + integrate Bluetooth ESC/POS print library (`lib/printer.ts`); build printer pairing flow in Settings.
+- [x] **T4.1** — Build business details config (Settings screen fields: name, GSTIN, address, state, phone, bank details, logo, invoice format) stored locally.
+- [x] **T4.2** — Build `lib/pdf.ts`: HTML bill template → PDF via `expo-print`, using business details + bill data.
+- [x] **T4.3** — Build Bill Result/Preview screen: show generated PDF.
+- [x] **T4.4** — Wire up Share action via `expo-sharing`.
+- [ ] **T4.5** — Research + integrate Bluetooth ESC/POS print library (`lib/printer.ts`); build printer pairing flow in Settings. *(BLOCKED — needs the shop's printer model. Phase 5 taken first.)*
 - [ ] **T4.6** — Wire up Print action from Bill Result screen.
 - [ ] **T4.7** — Test print output against actual shop printer model once available; adjust ESC/POS formatting as needed.
 
 ## Phase 5 — Dashboard & History
 
-- [ ] **T5.1** — Build Dashboard: today's sales total, bill count, low-stock count (computed from DB). *(The Dashboard tab currently holds the temporary T1.5 database verification panel, which this ticket replaces.)*
+- [x] **T5.1** — Build Dashboard: today's sales total, bill count, low-stock count (computed from DB). *(The Dashboard tab currently holds the temporary T1.5 database verification panel, which this ticket replaces.)*
 - [ ] **T5.2** — Build "New Bill" primary action button → routes to Billing screen.
 - [ ] **T5.3** — Build recent bills list on Dashboard (last 5).
 - [ ] **T5.4** — Build low-stock alert banner with tap-through to filtered Inventory view.
