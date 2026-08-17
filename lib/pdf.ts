@@ -445,6 +445,29 @@ export async function readLogoDataUri(logoPath: string | null): Promise<string |
 }
 
 /**
+ * The bill's HTML with its logo already embedded, ready to hand to
+ * `Print.printAsync({ html })`.
+ *
+ * Printing goes through HTML rather than through the generated PDF file on
+ * purpose. `expo-print`'s Android `{ uri }` path resumes its coroutine as soon
+ * as the job is handed to the system PrintManager, and then resumes it a second
+ * time from `onWrite` if anything goes wrong — an "Already resumed"
+ * IllegalStateException thrown on a background thread, which is an uncaught
+ * native crash rather than a JavaScript error. The `{ html }` path resumes
+ * exactly once, in its render callback.
+ *
+ * The output is identical either way: `generateBillPdf` renders this same HTML.
+ */
+export async function buildBillHtml(
+  bill: BillWithItems,
+  business: BusinessDetails
+): Promise<string> {
+  return renderBillHtml(bill, business, {
+    logoDataUri: await readLogoDataUri(business.logoPath),
+  });
+}
+
+/**
  * Renders the bill to a PDF and returns its path.
  *
  * `expo-print` writes to a cache file with a random name. It is moved into the
@@ -460,9 +483,7 @@ export async function generateBillPdf(
   bill: BillWithItems,
   business: BusinessDetails
 ): Promise<string> {
-  const html = renderBillHtml(bill, business, {
-    logoDataUri: await readLogoDataUri(business.logoPath),
-  });
+  const html = await buildBillHtml(bill, business);
 
   const printed = await Print.printToFileAsync({
     html,

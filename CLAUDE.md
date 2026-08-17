@@ -263,6 +263,32 @@ confirmation of the shop's existing signage/branding.
   number is not a thing to warn about and allow. A GSTIN/state disagreement is
   serious but recoverable, and the owner may be mid-edit with one of the two
   already correct.
+- **Never call `Print.printAsync({ uri })` on Android — use `{ html }`.** The
+  `uri` branch of expo-print's `PrintModule.kt` resumes its coroutine as soon as
+  the job is handed to the system `PrintManager` (line ~70), and then resumes it
+  a *second* time from `PrintDocumentAdapter.printFailed` if anything goes wrong
+  during `onWrite`. Resuming an already-resumed continuation throws
+  `IllegalStateException: Already resumed` on a background thread — an uncaught
+  **native crash**, not a JS error, so nothing appears in Metro. The `{ html }`
+  branch goes through `PrintPDFRenderTask` and resumes exactly once. Output is
+  identical, since `generateBillPdf` renders the same HTML. Use `buildBillHtml`.
+- **The Bill Result screen draws the bill natively; the PDF is one tap away.**
+  Android's WebView cannot display a PDF on its own, and the app is
+  offline-first so a remote viewer is out. Rather than add a PDF-rendering
+  dependency, the screen draws the same stored rows the PDF is built from — it
+  appears instantly, needs no network, and is readable on a phone without
+  pinching at an A4 page. "Open printable bill" calls `Print.printAsync({ uri })`,
+  and the Android print sheet renders the real PDF, so that is where printed
+  layout gets checked. Both surfaces read `bills`/`bill_items`, so they cannot
+  disagree.
+- **The PDF is generated on demand, not on arrival.** The owner reaches this
+  screen wanting to see that the bill saved, not to wait on a render. The
+  figures are on screen immediately; the file is made when it is asked for, and
+  its path is recorded on the bill so History never re-renders it.
+- **A PDF failure must not read as a bill failure.** The bill is already
+  committed by the time this screen exists. A render error says so explicitly —
+  "the bill is saved, but its PDF could not be made" — rather than showing
+  anything that suggests the sale did not record.
 - **The PDF renders from the STORED bill, never recalculating.** `lib/pdf.ts`
   reads `bills` and `bill_items` and prints those figures as they are. The
   customer's copy and the shop's record have to be the same document, and the
