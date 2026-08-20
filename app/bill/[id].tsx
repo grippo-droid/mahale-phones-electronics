@@ -50,8 +50,11 @@ import { selectBusiness, useSettingsStore } from '@/store/settings';
  * ---------------------------------------------------------------------------
  *
  * Sharing (T4.4) needs a real file, so that path does render the PDF through
- * `generateBillPdf` and records it on the bill. Bluetooth thermal printing is
- * T4.6.
+ * `generateBillPdf` and records it on the bill.
+ *
+ * There is no Bluetooth thermal printing and there will not be — see CLAUDE.md.
+ * "Open printable bill" hands the same PDF to the Android print sheet, which is
+ * the whole of the printing story here.
  */
 
 export default function BillResultScreen() {
@@ -308,7 +311,6 @@ export default function BillResultScreen() {
           </View>
         ) : null}
 
-        <Text style={styles.footnote}>Thermal printer support is added next.</Text>
       </ScrollView>
 
       <View style={styles.actions}>
@@ -470,7 +472,6 @@ const styles = StyleSheet.create({
 
   pdfError: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.xs },
   pdfErrorText: { flex: 1, fontSize: FontSizes.small, color: Colors.lowStock },
-  footnote: { fontSize: FontSizes.small, color: Colors.textMuted, textAlign: 'center' },
 
   actions: {
     gap: Spacing.sm,

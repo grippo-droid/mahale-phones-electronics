@@ -18,8 +18,8 @@ import {
  * are editable on the phone and travel with a Phase 6 backup.
  *
  * The store exists because those values are read all over the app — the tax
- * split on the Billing screen, the invoice header in T4.2, the thermal print in
- * T4.6 — and re-querying SQLite on every render would be both slow and a source
+ * split on the Billing screen and the invoice header in T4.2 — and re-querying
+ * SQLite on every render would be both slow and a source
  * of screens disagreeing with each other mid-edit.
  *
  * `hydrated` matters more than it looks. Before the first load completes the

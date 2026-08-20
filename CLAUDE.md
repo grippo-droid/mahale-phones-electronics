@@ -62,7 +62,6 @@ without flagging it to the owner first and explaining why.
 - **zustand** — shared app state (bill-in-progress cart, low-stock count, settings)
 - **expo-print** → PDF, **expo-sharing** → Android share sheet, **expo-file-system** → backups
 - **expo-image-picker** — choosing the shop logo in Settings (added in T4.1)
-- **Bluetooth ESC/POS printing** — library chosen in T4.5, once the shop's printer model is known
 - **EAS Build** → APK, installed directly (no Play Store in v1)
 
 Expo SDK 57 changed several APIs. Check the versioned docs at
@@ -87,8 +86,9 @@ db/                       data access layer — the seam for future cloud sync
   bills.ts                bill CRUD (transactional)
   backup.ts               export / import DB
 components/               reusable UI (ProductCard, BillItemRow, GstSummary, LowStockBadge)
-lib/                      gst.ts, pdf.ts, printer.ts, invoiceNumber.ts,
-                          billDraft.ts, customer.ts, gstin.ts, logo.ts
+lib/                      gst.ts, pdf.ts, invoiceNumber.ts, billDraft.ts,
+                          customer.ts, gstin.ts, logo.ts, format.ts,
+                          categories.ts, dateRanges.ts, numberToWords.ts
 constants/                business.ts (shop details), theme.ts (colours, spacing, type)
 docs/                     the five planning documents
 ```
@@ -480,7 +480,16 @@ confirmation of the shop's existing signage/branding.
   year — but the far commoner case is raising a bill and coming here to check it
   saved, and a History screen that does not show the bill just made is the worse
   of the two failures.
-
+- **Bluetooth thermal printing is out of scope, not deferred.** The shop bills
+  over WhatsApp: the customer gets the PDF on their phone, which T4.2–T4.4
+  already deliver. A thermal printer would add a native dependency, a pairing
+  flow in Settings, a second bill layout in ESC/POS, and a class of failure —
+  unpaired, out of paper, out of range — arriving at the moment a customer is
+  waiting to be handed something. `lib/printer.ts` is not a gap in the folder
+  structure; it is a file that will not exist. A printed copy is still one tap
+  away: "Open printable bill" renders the real PDF through the Android print
+  sheet, which drives whatever printer Android can already see. Do not re-raise
+  this as an open item or a blocked ticket.
 ## Open decisions (from the planning docs)
 
 - Exact registered business name, and the shop address (line 1, line 2, city,
@@ -490,7 +499,6 @@ confirmation of the shop's existing signage/branding.
   the app will reissue numbers the customer already holds). Defaults today are
   `MPE/{FY}/{SEQ}`, financial-year reset, starting at 1 — all `PLACEHOLDER` in
   `constants/business.ts`. The owner is confirming these with the shop before T3.6.
-- Bluetooth thermal printer model (blocks T4.5 / T4.7)
 - Low-stock threshold: global default or per-product
 - Whether to import an existing inventory spreadsheet at launch
 - English-only vs. bilingual (Hindi/Marathi) UI

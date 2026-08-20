@@ -6,13 +6,23 @@
 
 **How to use this:** Hand these one at a time, roughly in order. Each ticket is scoped to be independently buildable and testable. Check off as completed.
 
-**Status:** 38 of 59 tickets. Phases 0–3 and 5 complete; Phase 4 complete
-except Bluetooth printing (T4.5–T4.7, blocked). Two tickets added to Phase 3 at
-the owner's request, both done: T3.7 and T3.8.
+**Status:** 38 of 56 live tickets. Phases 0–5 complete. Two tickets added to
+Phase 3 at the owner's request, both done: T3.7 and T3.8. Three dropped: the
+Bluetooth printing tickets T4.5–T4.7 (see below).
 
 The app takes a sale end to end — search stock, build a cart, capture the
 customer, compute GST, write a numbered bill that decrements inventory, then
 render it as a GST invoice to share on WhatsApp or print.
+
+**Bluetooth thermal printing is out of scope.** T4.5–T4.7 are dropped, not
+deferred. The owner confirmed the shop bills over WhatsApp: the customer gets
+the PDF on their phone, which is already built and working (T4.2–T4.4). A
+thermal printer would add a native dependency, a pairing flow, a second bill
+layout in ESC/POS and a class of failure — unpaired, out of paper, out of
+range — at the exact moment a customer is waiting. Nothing in the app depends
+on them, so this removes a dependency rather than leaving a gap. A printed copy
+is still available: "Open printable bill" renders the real PDF through the
+Android print sheet, which drives any printer Android can already see.
 
 **Waiting on the shop owner** (all enterable in Settings — no code change):
 
@@ -24,7 +34,6 @@ render it as a GST invoice to share on WhatsApp or print.
 - **Remaining business details** — registered name, address, phone, email and
   bank details. These print on the invoice, which currently has blank gaps where
   they belong. GSTIN and state are confirmed.
-- **The Bluetooth thermal printer model** — blocks T4.5 and T4.7.
 
 ---
 
@@ -74,9 +83,9 @@ render it as a GST invoice to share on WhatsApp or print.
 - [x] **T4.2** — Build `lib/pdf.ts`: HTML bill template → PDF via `expo-print`, using business details + bill data.
 - [x] **T4.3** — Build Bill Result/Preview screen: show generated PDF.
 - [x] **T4.4** — Wire up Share action via `expo-sharing`.
-- [ ] **T4.5** — Research + integrate Bluetooth ESC/POS print library (`lib/printer.ts`); build printer pairing flow in Settings. *(BLOCKED — needs the shop's printer model. Phase 5 taken first.)*
-- [ ] **T4.6** — Wire up Print action from Bill Result screen.
-- [ ] **T4.7** — Test print output against actual shop printer model once available; adjust ESC/POS formatting as needed.
+- ~~**T4.5** — Research + integrate Bluetooth ESC/POS print library (`lib/printer.ts`); build printer pairing flow in Settings.~~ *(OUT OF SCOPE — the shop bills over WhatsApp.)*
+- ~~**T4.6** — Wire up Print action from Bill Result screen.~~ *(OUT OF SCOPE. "Open printable bill" already renders the PDF through the Android print sheet.)*
+- ~~**T4.7** — Test print output against actual shop printer model; adjust ESC/POS formatting as needed.~~ *(OUT OF SCOPE.)*
 
 ## Phase 5 — Dashboard & History
 
@@ -107,7 +116,7 @@ render it as a GST invoice to share on WhatsApp or print.
 
 - [ ] **T8.1** — Publish an `eas update` after core UI (Phases 1-5) is in place; share the link/QR with the owner for early UI/flow feedback via Expo Go (see Technical Architecture Section 7.2, Stage A).
 - [ ] **T8.2** — Incorporate owner feedback from Stage A review.
-- [ ] **T8.3** — Build a `preview` profile APK once billing + printing are working; send directly to owner to test the real experience, especially Bluetooth printing (Stage B).
+- [ ] **T8.3** — Build a `preview` profile APK once billing and bill output are working; send directly to owner to test the real experience, especially sharing a bill to WhatsApp and the logo picker, which Expo Go cannot exercise (Stage B).
 - [ ] **T8.4** — Incorporate owner feedback from Stage B review; repeat preview builds as needed until owner approves.
 - [ ] **T8.5** — Once approved, build the `production` profile APK (final release).
 - [ ] **T8.6** — Test-install the production APK on an actual phone; walk through full end-to-end flow: add product → create bill → share/print → check history → backup.
