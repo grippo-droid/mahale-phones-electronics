@@ -27,14 +27,17 @@ Android print sheet, which drives any printer Android can already see.
 
 **Waiting on the shop owner** (all enterable in Settings — no code change):
 
-- **Invoice numbering** — the real format, the reset policy and the starting
-  number. Today's defaults (`MPE/{FY}/{SEQ}`, financial-year reset, starting at
-  1) are placeholders. The starting number matters most: if a paper bill book is
-  part-used, starting at 1 reissues numbers customers already hold, and any bill
-  raised before it is set keeps its number permanently.
-- **Remaining business details** — registered name, address, phone, email and
-  bank details. These print on the invoice, which currently has blank gaps where
-  they belong. GSTIN and state are confirmed.
+- **Invoice numbering — the format.** The owner is deciding between keeping
+  plain sequential numbering (151, 152, …) and moving to the structured format
+  (`MPE/2026-27/0151`). Both are supported today: plain sequential is format
+  `{SEQ:1}` with reset `never`; the structured one is `MPE/{FY}/{SEQ}` with a
+  financial-year reset. **The starting number is settled at 151** — the previous
+  paper system reached 150 — but is deliberately not set until the format is
+  confirmed, at the owner's instruction. Any bill raised before it is set keeps
+  its number permanently.
+- **The shop's pincode**, and the **bank details** if they are to print on the
+  bill. Everything else is confirmed: name, GSTIN, state, address, phone and
+  email.
 
 ---
 

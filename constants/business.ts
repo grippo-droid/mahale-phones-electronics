@@ -2,12 +2,13 @@
  * Business details printed on every bill.
  *
  * ============================================================================
- * !!! PLACEHOLDER VALUES — MUST BE REPLACED BEFORE THE APP IS USED FOR REAL !!!
+ * !!! SOME PLACEHOLDER VALUES REMAIN — see the PLACEHOLDER markers below !!!
  * ============================================================================
  *
- * Every value marked PLACEHOLDER below comes from PRD Section 8 and is a
- * stand-in. Search this repo for the string "PLACEHOLDER" to find every spot
- * that still needs real data.
+ * The shop name, GSTIN, state, address, phone and email are confirmed. What is
+ * still a stand-in: the pincode, the bank details, and the invoice numbering.
+ * Search this repo for the string "PLACEHOLDER" to find every spot that still
+ * needs real data.
  *
  * From T4.1 onward these values become editable in the Settings screen and are
  * persisted locally; this file then only supplies the first-run defaults.
@@ -45,21 +46,30 @@ export type BusinessDetails = {
 };
 
 export const BUSINESS_DETAILS: BusinessDetails = {
-  // PRD Section 8 — confirm the exact registered business name.
-  name: 'Mahale Phones and Electronics', // PLACEHOLDER — confirm registered name
+  // Confirmed by the owner from an existing printed bill. Note the capital
+  // "And" — this is the name as it appears on his own paperwork, so it is left
+  // exactly as given rather than tidied into house style.
+  name: 'Mahale Phones And Electronics',
   // Confirmed by the owner. Check digit verified with lib/gstin.ts, and the
   // state below is its first two digits (23) rather than a separate answer, so
   // the two cannot drift apart.
   gstin: '23ALYPM5121B1ZA',
-  addressLine1: 'PLACEHOLDER_ADDRESS_LINE_1', // PLACEHOLDER
-  addressLine2: 'PLACEHOLDER_ADDRESS_LINE_2', // PLACEHOLDER
-  city: 'PLACEHOLDER_CITY', // PLACEHOLDER
+  // Confirmed by the owner as one line: "Shop no. 7 ARCO COMPLEX Shanwara
+  // Burhanpur MP". Split across the fields the invoice template prints on
+  // separate lines — premises, then locality, then city. The split is a
+  // judgement, not something the owner stated; it changes how the address is
+  // laid out on the bill but not what it says.
+  addressLine1: 'Shop No. 7, ARCO Complex',
+  addressLine2: 'Shanwara',
+  city: 'Burhanpur',
   // Confirmed — drives CGST/SGST vs IGST. Must stay spelled as in
   // constants/states.ts, which is what the customer's state is matched against.
   state: 'Madhya Pradesh',
-  pincode: 'PLACEHOLDER_PINCODE', // PLACEHOLDER
-  phone: 'PLACEHOLDER_PHONE', // PLACEHOLDER
-  email: 'PLACEHOLDER_EMAIL', // PLACEHOLDER
+  // Still needed. Not guessed from the city: a wrong pincode on a GST invoice
+  // is worse than a blank one, and a PLACEHOLDER prints as an empty gap.
+  pincode: 'PLACEHOLDER_PINCODE', // PLACEHOLDER — ask the owner
+  phone: '9826351449',
+  email: 'mahale71phones@gmail.com',
   bankName: 'PLACEHOLDER_BANK_NAME', // PLACEHOLDER — optional, bill footer
   bankAccountNumber: 'PLACEHOLDER_ACCOUNT_NUMBER', // PLACEHOLDER — optional
   bankIfsc: 'PLACEHOLDER_IFSC', // PLACEHOLDER — optional

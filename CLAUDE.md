@@ -126,6 +126,18 @@ from PRD Section 8 and marked with the string `PLACEHOLDER`. Grep for
 - `state` — `Madhya Pradesh`, derived from the GSTIN's first two digits (`23`)
   rather than answered separately, so the two cannot disagree. This is what
   decides CGST/SGST vs IGST, so bills now compute the correct split.
+- `name` — `Mahale Phones And Electronics`. Taken from the shop's own printed
+  bill, capital "And" included; it is left exactly as given rather than tidied,
+  because it is the name on his paperwork.
+- `addressLine1` / `addressLine2` / `city` — `Shop No. 7, ARCO Complex` /
+  `Shanwara` / `Burhanpur`. The owner gave this as one line ("Shop no. 7 ARCO
+  COMPLEX Shanwara Burhanpur MP"); splitting it across the three fields the
+  invoice prints separately is a judgement, not something he stated. The
+  trailing "MP" is dropped as a duplicate of the state field.
+- `phone` — `9826351449`. `email` — `mahale71phones@gmail.com`.
+- The **pincode is still missing** and is deliberately not guessed from the
+  city. A wrong pincode on a GST invoice is worse than a blank one, and a
+  `PLACEHOLDER` prints as an empty gap.
 
 `businessStateGstinMismatch()` re-checks that pairing, and the Settings screen
 runs it live — both fields are editable there and can be made to contradict each
@@ -568,13 +580,15 @@ confirmation of the shop's existing signage/branding.
 
 ## Open decisions (from the planning docs)
 
-- Exact registered business name, and the shop address (line 1, line 2, city,
-  pincode). GSTIN and state are now confirmed — see above.
-- Invoice numbering: the real format, whether the sequence resets each financial
-  year, and the starting number (raise it if a paper bill book is part-used, or
-  the app will reissue numbers the customer already holds). Defaults today are
-  `MPE/{FY}/{SEQ}`, financial-year reset, starting at 1 — all `PLACEHOLDER` in
-  `constants/business.ts`. The owner is confirming these with the shop before T3.6.
+- The shop's pincode. Name, GSTIN, state, address, phone and email are all
+  confirmed — see `constants/business.ts`.
+- Invoice numbering: the **format only**. The starting number is settled at 151
+  (the paper book reached 150) but is not to be written until the format is
+  chosen — the owner asked for it to be held. The choice is between plain
+  sequential (`{SEQ:1}` with reset `never`, giving 151, 152, …) and the
+  structured format (`MPE/{FY}/{SEQ}` with a financial-year reset, giving
+  `MPE/2026-27/0151`). Both validate today. Note that `{SEQ}` alone pads to four
+  digits — `0151` — so plain continuation of the paper series needs `{SEQ:1}`.
 - Low-stock threshold: global default or per-product
 - Whether to import an existing inventory spreadsheet at launch
 - English-only vs. bilingual (Hindi/Marathi) UI
