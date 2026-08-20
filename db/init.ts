@@ -64,7 +64,14 @@ async function openAndMigrate(): Promise<SQLiteDatabase> {
   return db;
 }
 
-async function runMigrations(db: SQLiteDatabase): Promise<void> {
+/**
+ * Brings a database up to LATEST_SCHEMA_VERSION.
+ *
+ * Exported because a restore has to run it against the incoming database as
+ * well as the live one — a backup taken on an older schema is brought forward
+ * before its rows are copied in, so the two schemas match.
+ */
+export async function runMigrations(db: SQLiteDatabase): Promise<void> {
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS schema_version (
       version    INTEGER PRIMARY KEY NOT NULL,

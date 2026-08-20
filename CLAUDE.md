@@ -577,32 +577,49 @@ confirmation of the shop's existing signage/branding.
   necessarily records the backup *before* the one being restored, since a file
   cannot contain its own creation time — which errs towards nagging, the safe
   direction.
-- **A restore snapshots the current database before destroying it, and puts it
-  back if anything fails.** The order is the safety: snapshot, write the
-  snapshot to disk, close, clear the write-ahead log, overwrite, reopen, read
-  something back. A failure at any point after the close rolls the snapshot in.
-  The snapshot is written to `restore-safety/` — outside `backups/`, so pruning
-  never takes it — in the ordinary backup format, so if it is ever needed it can
-  be restored through the same flow rather than by a developer.
-- **The database connection is reopened whatever else failed.** The first
-  version ran the rollback's write and reopen inside one `try`, so a refused
-  write skipped the reopen and left the app with no connection at all — every
-  screen throwing `Database not initialised yet` until a force-quit. Found on
-  the phone, where it surfaced as that message appearing in red in Settings.
-  `recover()` now attempts the reopen in its own `try`, unconditionally. A
-  failed restore must cost at most the restore.
-- **A failed restore reports what actually happened, not the worst case.**
-  `RestoreOutcome` distinguishes four: `untouched` (the write never happened,
-  so the original database is exactly as it was — the commonest case, and the
-  one that must not raise an alarm), `rolled-back`, `needs-restart` (the data
-  is back on disk but the connection would not reopen), and `unrecovered`.
-  Only the last says data could not be put back. Raising a false alarm about
-  data loss spends the credibility needed for the case where it is real.
-- **Clearing the `-wal` and `-shm` files is not optional.** SQLite runs in WAL
-  mode, and a write-ahead log left over from the old database is replayed on top
-  of the new one. That is not a failed restore but a corrupted database — the one
-  outcome worse than doing nothing. It is cleared before the restore write and
-  again before the rollback write.
+- **A restore copies rows through `ATTACH`; it never replaces the database
+  file.** The obvious implementation — close the connection, overwrite
+  `mahale.db`, reopen — *silently does nothing on this platform*, and shipped
+  doing exactly that: the restore reported success and the data was unchanged.
+  `SQLiteModule.kt` reference-counts connections. Its constructor looks for an
+  already-open database on the same path and, if it finds one, calls `addRef()`
+  and returns the existing handle — a cache kept expressly "for fast refresh",
+  which is the Expo Go dev case. `closeAsync` mirrors it: `release()`, and only
+  a true close at zero. So closing need not close anything. The old `sqlite3*`
+  stays open on the old inode, deleting the file only unlinks the name, and
+  reopening hands back that same cached handle still reading the deleted file.
+  Nothing throws. Nothing changes. **Never close and swap the database file.**
+- **The incoming database is staged, migrated in its own right, then ATTACHed
+  and copied in one transaction.** SQLite's transaction *is* the rollback: a
+  failure leaves the shop exactly as it was, with no snapshot to write back by
+  hand. No closing, no refcounts, no inodes, no `-wal` to clear. A safety copy
+  is still written to `restore-safety/` first, in the ordinary backup format so
+  it can be restored through the same flow rather than by a developer.
+- **Columns are named in the copy, never `SELECT *`.** `ALTER TABLE ADD COLUMN`
+  can leave two schemas with the same columns in a different order, and
+  `SELECT *` would then copy values into the wrong fields silently.
+  `sharedColumns` intersects `PRAGMA table_info` from both sides.
+- **Foreign keys are deferred for the copy** (`PRAGMA defer_foreign_keys = ON`),
+  so the tables can be emptied children-first and filled parents-first without
+  a constraint firing mid-transaction. `ATTACH` cannot run inside a
+  transaction, so it brackets it.
+- **A restore never closes the live connection at all**, which is what made the
+  earlier "Database not initialised yet" failure possible: a refused write
+  skipped the reopen and left the app with no database until it was
+  force-quit. There is nothing to reopen now.
+- **A restore is verified against the manifest, not against "the database
+  still opens".** The first implementation checked only that the tables could
+  be queried afterwards — which a restore that changed nothing passes. The row
+  counts are now compared with the backup's own manifest, so a restore that
+  did not restore fails loudly instead of being discovered months later. There
+  are two outcomes left: `untouched` (the transaction rolled back, nothing
+  changed) and `mismatch` (it committed but the result disagrees with the
+  file).
+- **A stale `-wal` beside a *staged* file is still cleared.** The live database
+  is no longer touched, but a write-ahead log left by a previous restore
+  attempt would be replayed over the staging file that has just been written.
+- **`runMigrations` is exported from `db/init.ts`** so a restore can bring an
+  older backup forward before its rows are copied, making the two schemas match.
 - **The restore steps are injected (`RestoreIo`) so the recovery path is
   testable.** Every step touches the filesystem or the live connection, neither
   of which exists in a test, but the ordering and the failure handling are the

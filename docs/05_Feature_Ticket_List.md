@@ -103,7 +103,7 @@ Android print sheet, which drives any printer Android can already see.
 
 - [x] **T6.1** — Build `db/backup.ts`: export SQLite DB + manifest to a single shareable file. *(Reads the format as well as writing it, so T6.3 restores something already known to parse.)*
 - [x] **T6.2** — Build "Backup Data" action in Settings, using share sheet (Drive, email, etc.). *(Includes the reminder added at the owner's request: a "Backed up N days ago" line in Settings and a Dashboard nudge once a backup is more than 14 days old.)*
-- [x] **T6.3** — Build "Restore Data" flow: file picker, validation, DB replacement (with confirmation warning). *(Takes a snapshot of the current database before touching anything, and puts it back if the restored file will not open or cannot be read.)*
+- [x] **T6.3** — Build "Restore Data" flow: file picker, validation, DB replacement (with confirmation warning). *(Copies the rows in through ATTACH inside one transaction rather than replacing the database file — expo-sqlite reference-counts connections, so closing and swapping the file silently does nothing. The result is checked against the backup manifest.)*
 
 ## Phase 7 — Polish & Non-Functional
 
