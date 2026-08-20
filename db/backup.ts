@@ -2,7 +2,7 @@ import Constants from 'expo-constants';
 import { Directory, File, Paths } from 'expo-file-system';
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { getDatabase, getSchemaVersion } from './init';
+import { closeDatabase, getDatabase, getSchemaVersion, initDatabase } from './init';
 import { LATEST_SCHEMA_VERSION } from './schema';
 import { BUSINESS_SETTING_KEYS, setLastBackupAt } from './settings';
 
@@ -477,4 +477,309 @@ export async function inspectBackup(uri: string): Promise<ParsedBackup> {
   if (!file.exists) throw new BackupFormatError('That backup file could not be found.');
 
   return decodeBackup(await file.bytes());
+}
+
+// ---------------------------------------------------------------------------
+// Restore (T6.3)
+// ---------------------------------------------------------------------------
+
+/** What a restore would replace, and what with. */
+export type RestorePreview = {
+  /** The backup's own description of itself. */
+  manifest: BackupManifest;
+  /** What is on the phone right now, so the two can be compared before deciding. */
+  current: BackupCounts & { shopName: string | null };
+};
+
+/**
+ * Reads a backup and pairs it with what is currently on the phone.
+ *
+ * This exists so the confirmation is answerable. "Replace all your data?" is a
+ * question nobody can say yes to safely; "replace 214 bills with the 198 in this
+ * backup from 12 August?" is one the owner can actually judge.
+ */
+export async function previewRestore(
+  uri: string,
+  db: SQLiteDatabase = getDatabase()
+): Promise<RestorePreview> {
+  const { manifest } = await inspectBackup(uri);
+
+  const [products, bills, billItems, settings, shopName] = await Promise.all([
+    countRows(db, 'products'),
+    countRows(db, 'bills'),
+    countRows(db, 'bill_items'),
+    countRows(db, 'app_settings'),
+    shopNameFor(db),
+  ]);
+
+  return { manifest, current: { products, bills, billItems, settings, shopName } };
+}
+
+/**
+ * The steps a restore is made of, injected so the recovery path can be tested.
+ *
+ * Everything here either touches the filesystem or the live connection, neither
+ * of which exists in a test — but the ordering, and what happens when a step
+ * fails, is the entire safety of the operation. Untested rollback code is code
+ * that has never run.
+ */
+export type RestoreIo = {
+  /** A snapshot of the current database, taken before anything is destroyed. */
+  snapshotCurrent: () => Promise<Uint8Array>;
+  /** Keeps the snapshot somewhere the owner could still reach it by hand. */
+  keepSafetyCopy: (bytes: Uint8Array) => Promise<void>;
+  closeDatabase: () => Promise<void>;
+  /**
+   * Removes the write-ahead log beside the database file.
+   *
+   * Not optional. SQLite runs in WAL mode here, and a `-wal` left over from the
+   * old database will be replayed on top of the new one — which is not a failed
+   * restore but a corrupted database, the one outcome worse than doing nothing.
+   */
+  clearWriteAheadLog: () => void;
+  writeDatabase: (bytes: Uint8Array) => void;
+  /** Reopens and migrates. An older backup is brought forward here. */
+  openDatabase: () => Promise<void>;
+  /** Reads something back, to prove the restored file is actually usable. */
+  verify: () => Promise<void>;
+};
+
+/**
+ * How a failed restore left the phone.
+ *
+ * The distinction is not academic. The commonest failure is the write being
+ * refused before anything has been overwritten, and telling the owner his data
+ * could not be put back — when the file was never touched — is a false alarm
+ * about the one thing he cannot afford to be wrong about.
+ */
+export type RestoreOutcome =
+  /** The write never happened, so the original database is exactly as it was. */
+  | 'untouched'
+  /** The original was written back over the failed restore, and reopened. */
+  | 'rolled-back'
+  /** The data is in place, but the connection could not be reopened. */
+  | 'needs-restart'
+  /** The original could not be put back. The safety copy is the way out. */
+  | 'unrecovered';
+
+const RESTORE_OUTCOME_MESSAGES: Record<RestoreOutcome, string> = {
+  untouched:
+    'The restore could not be started, so nothing on this phone was changed. ' +
+    'Your products and bills are exactly as they were.',
+  'rolled-back':
+    'The backup could not be restored, so your existing data has been put back. Nothing was lost.',
+  'needs-restart':
+    'Your data is still on this phone, but the app could not reopen it. ' +
+    'Please close the app completely and open it again.',
+  unrecovered:
+    'The backup could not be restored, and your existing data could not be put back. ' +
+    'Do not close the app — a copy was saved on this phone before the restore started.',
+};
+
+export class RestoreFailedError extends Error {
+  readonly outcome: RestoreOutcome;
+
+  /** Whether the shop's own data is intact. False only for `unrecovered`. */
+  readonly rolledBack: boolean;
+
+  constructor(outcome: RestoreOutcome, options?: { cause?: unknown }) {
+    super(RESTORE_OUTCOME_MESSAGES[outcome], options);
+    this.name = 'RestoreFailedError';
+    this.outcome = outcome;
+    this.rolledBack = outcome !== 'unrecovered';
+  }
+}
+
+/**
+ * Replaces the database with a backup, putting the old one back if anything
+ * goes wrong.
+ *
+ * The order is the safety: snapshot first, and only then close, clear and
+ * overwrite. If the new database will not open, or opens but cannot be read,
+ * the snapshot goes back and the shop is where it started.
+ *
+ * Two rules the recovery path has to follow, both learned the hard way:
+ *
+ *   - **The connection is always reopened, whatever else failed.** Leaving it
+ *     closed does not fail the restore, it breaks the entire app — every screen
+ *     that touches the database throws until it is force-quit, and the message
+ *     the owner sees is whatever internal text happens to surface first.
+ *
+ *   - **What actually happened is reported, not the worst case.** If the write
+ *     was refused, nothing was overwritten and the honest answer is that nothing
+ *     changed. Raising the alarm about data loss that did not occur spends
+ *     credibility that is needed for the case where it did.
+ */
+export async function performRestore(database: Uint8Array, io: RestoreIo): Promise<void> {
+  const snapshot = await io.snapshotCurrent();
+
+  // Written to disk as well as held in memory: if the app is killed mid-restore
+  // — the phone runs out of memory, the owner switches away — this file is the
+  // only remaining copy of what was there before.
+  await io.keepSafetyCopy(snapshot);
+
+  await io.closeDatabase();
+
+  // Tracks whether the database file was actually overwritten, which is what
+  // separates "nothing happened" from "something has to be put back".
+  let replaced = false;
+
+  try {
+    io.clearWriteAheadLog();
+    io.writeDatabase(database);
+    replaced = true;
+
+    await io.openDatabase();
+    await io.verify();
+    return;
+  } catch (error) {
+    throw new RestoreFailedError(await recover(io, snapshot, replaced), { cause: error });
+  }
+}
+
+/**
+ * Puts things back as far as they will go, and reports how far that was.
+ *
+ * The reopen is attempted unconditionally and in its own try, so that a failure
+ * to write the snapshot back cannot also cost the app its connection.
+ */
+async function recover(
+  io: RestoreIo,
+  snapshot: Uint8Array,
+  replaced: boolean
+): Promise<RestoreOutcome> {
+  // Nothing was overwritten, so there is nothing to put back.
+  let intact = !replaced;
+
+  if (replaced) {
+    try {
+      io.clearWriteAheadLog();
+      io.writeDatabase(snapshot);
+      intact = true;
+    } catch {
+      intact = false;
+    }
+  }
+
+  let reopened = false;
+  try {
+    await io.openDatabase();
+    reopened = true;
+  } catch {
+    reopened = false;
+  }
+
+  if (!intact) return 'unrecovered';
+  if (!reopened) return 'needs-restart';
+  return replaced ? 'rolled-back' : 'untouched';
+}
+
+/** Where the pre-restore snapshot goes. Outside `backups/`, so pruning never takes it. */
+const SAFETY_DIRECTORY_NAME = 'restore-safety';
+
+export const SAFETY_COPY_NAME = `before-restore${BACKUP_FILE_EXTENSION}`;
+
+/**
+ * A `file://` URI for a path that may be either. `SQLiteDatabase.databasePath`
+ * is a plain filesystem path; `expo-file-system` wants a URI.
+ */
+function asFileUri(path: string): string {
+  return path.startsWith('file://') ? path : `file://${path}`;
+}
+
+/**
+ * Builds the real steps, bound to the database that is open right now.
+ *
+ * The path is read from the live connection rather than rebuilt from
+ * `defaultDatabaseDirectory` and the database name, so it cannot drift from
+ * wherever expo-sqlite actually put the file.
+ */
+export function fileSystemRestoreIo(db: SQLiteDatabase = getDatabase()): RestoreIo {
+  const databaseUri = asFileUri(db.databasePath);
+  const databaseFile = () => new File(databaseUri);
+
+  return {
+    snapshotCurrent: async () => {
+      await db.execAsync('PRAGMA wal_checkpoint(TRUNCATE);');
+      return db.serializeAsync();
+    },
+
+    keepSafetyCopy: async (bytes) => {
+      const directory = new Directory(Paths.document, SAFETY_DIRECTORY_NAME);
+      if (!directory.exists) directory.create({ intermediates: true });
+
+      const manifest: BackupManifest = {
+        format: FORMAT_VERSION,
+        app: 'mahale-phones-electronics',
+        appVersion: Constants.expoConfig?.version ?? 'unknown',
+        schemaVersion: LATEST_SCHEMA_VERSION,
+        createdAt: new Date().toISOString(),
+        shopName: null,
+        databaseBytes: bytes.length,
+        checksum: checksum(bytes),
+        counts: { products: 0, bills: 0, billItems: 0, settings: 0 },
+      };
+
+      // Kept in the same format as any other backup, so if it is ever needed it
+      // can be restored by the same flow rather than by a developer.
+      const file = new File(directory, SAFETY_COPY_NAME);
+      if (file.exists) file.delete();
+      file.create();
+      file.write(encodeBackup(bytes, manifest));
+    },
+
+    closeDatabase: () => closeDatabase(),
+
+    clearWriteAheadLog: () => {
+      for (const suffix of ['-wal', '-shm']) {
+        try {
+          const sidecar = new File(`${databaseUri}${suffix}`);
+          if (sidecar.exists) sidecar.delete();
+        } catch {
+          // Absent is the desired state; failing to delete what is not there is
+          // not a problem worth aborting a restore for.
+        }
+      }
+    },
+
+    writeDatabase: (bytes) => {
+      const file = databaseFile();
+      if (file.exists) file.delete();
+      file.create();
+      file.write(bytes);
+    },
+
+    openDatabase: async () => {
+      await initDatabase();
+    },
+
+    // Reads across all four tables. Opening proves the header is intact; this
+    // proves the schema is there and the rows can actually be queried, which is
+    // what "restored" has to mean.
+    verify: async () => {
+      const db2 = getDatabase();
+      await Promise.all([
+        countRows(db2, 'products'),
+        countRows(db2, 'bills'),
+        countRows(db2, 'bill_items'),
+        countRows(db2, 'app_settings'),
+      ]);
+    },
+  };
+}
+
+/**
+ * The whole flow: read the file, check it, then replace the database.
+ *
+ * Validation runs again here even though the screen has already previewed the
+ * file. The preview and the restore are separated by however long the owner
+ * spends reading the confirmation, and this is the step that cannot be undone.
+ */
+export async function restoreBackup(
+  uri: string,
+  io: RestoreIo = fileSystemRestoreIo()
+): Promise<BackupManifest> {
+  const { manifest, database } = await inspectBackup(uri);
+  await performRestore(database, io);
+  return manifest;
 }

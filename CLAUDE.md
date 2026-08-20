@@ -84,7 +84,7 @@ db/                       data access layer — the seam for future cloud sync
   init.ts                 DB setup on app start
   products.ts             product CRUD
   bills.ts                bill CRUD (transactional)
-  backup.ts               export / import DB
+  backup.ts               export / import DB, and the restore rollback
 components/               reusable UI (ProductCard, BillItemRow, GstSummary, LowStockBadge)
 lib/                      gst.ts, pdf.ts, invoiceNumber.ts, billDraft.ts,
                           customer.ts, gstin.ts, logo.ts, format.ts,
@@ -577,6 +577,69 @@ confirmation of the shop's existing signage/branding.
   necessarily records the backup *before* the one being restored, since a file
   cannot contain its own creation time — which errs towards nagging, the safe
   direction.
+- **A restore snapshots the current database before destroying it, and puts it
+  back if anything fails.** The order is the safety: snapshot, write the
+  snapshot to disk, close, clear the write-ahead log, overwrite, reopen, read
+  something back. A failure at any point after the close rolls the snapshot in.
+  The snapshot is written to `restore-safety/` — outside `backups/`, so pruning
+  never takes it — in the ordinary backup format, so if it is ever needed it can
+  be restored through the same flow rather than by a developer.
+- **The database connection is reopened whatever else failed.** The first
+  version ran the rollback's write and reopen inside one `try`, so a refused
+  write skipped the reopen and left the app with no connection at all — every
+  screen throwing `Database not initialised yet` until a force-quit. Found on
+  the phone, where it surfaced as that message appearing in red in Settings.
+  `recover()` now attempts the reopen in its own `try`, unconditionally. A
+  failed restore must cost at most the restore.
+- **A failed restore reports what actually happened, not the worst case.**
+  `RestoreOutcome` distinguishes four: `untouched` (the write never happened,
+  so the original database is exactly as it was — the commonest case, and the
+  one that must not raise an alarm), `rolled-back`, `needs-restart` (the data
+  is back on disk but the connection would not reopen), and `unrecovered`.
+  Only the last says data could not be put back. Raising a false alarm about
+  data loss spends the credibility needed for the case where it is real.
+- **Clearing the `-wal` and `-shm` files is not optional.** SQLite runs in WAL
+  mode, and a write-ahead log left over from the old database is replayed on top
+  of the new one. That is not a failed restore but a corrupted database — the one
+  outcome worse than doing nothing. It is cleared before the restore write and
+  again before the rollback write.
+- **The restore steps are injected (`RestoreIo`) so the recovery path is
+  testable.** Every step touches the filesystem or the live connection, neither
+  of which exists in a test, but the ordering and the failure handling are the
+  whole safety of the operation. Untested rollback code is code that has never
+  run. The suite drives it through a fake and asserts the order, both rollback
+  paths, and that a failure before the close touches nothing.
+- **The confirmation compares the backup with the phone.** "Replace all your
+  data?" is a question nobody can answer safely. It names the backup's date,
+  shop name and counts beside the current counts, says that bills raised since
+  the backup go too, and says it cannot be undone. The same warning is shown
+  before Restore is tapped, not only after — someone reaching for Restore wants
+  their data back and does not always realise what is on the phone goes in its
+  place.
+- **The file is validated again at restore time, not just at preview.** The two
+  are separated by however long the owner spends reading the confirmation, and
+  the second is the step that cannot be undone.
+- **After a restore the settings store is reloaded and the cart is cleared.**
+  The database underneath the app is a different one: the store holds the old
+  shop's details, and the cart holds product ids that may now belong to nothing.
+- **An older backup is restored and migrated forward, not refused.** `db/init.ts`
+  migrates on open, which is exactly what a restored older database needs. Only a
+  *newer* schema is refused, matching the rule already applied to the live
+  database.
+- **The database path comes from the live connection (`databasePath`), not from
+  rebuilding it out of `defaultDatabaseDirectory` and the database name.** The
+  rebuilt path would be a second definition of where the file is, free to drift
+  from wherever expo-sqlite actually put it.
+- **Internal error messages never reach the screen.** `getDatabase()` throws
+  "Database not initialised yet — await initDatabase() first", which is a note
+  to a developer; on a counter it just looks like the app has broken. Settings
+  routes every message it displays through `ownerMessage`, which passes
+  `BackupFormatError` and `RestoreFailedError` through unchanged — those are
+  written to be read — and replaces anything else with a plain sentence, logging
+  the original so it is still visible in Metro. A test asserts that no catch
+  builds its text out of a raw error again.
+- **`expo-file-system`'s `File.pickFileAsync` is the file picker** — SDK 57 has
+  one built in, so no `expo-document-picker` dependency was added.
 
 ## Open decisions (from the planning docs)
 

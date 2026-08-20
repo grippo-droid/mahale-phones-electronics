@@ -6,8 +6,7 @@
 
 **How to use this:** Hand these one at a time, roughly in order. Each ticket is scoped to be independently buildable and testable. Check off as completed.
 
-**Status:** 40 of 56 live tickets. Phases 0–5 complete; Phase 6 needs only
-restore (T6.3). Two tickets added to Phase 3 at the owner's request, both done:
+**Status:** 41 of 56 live tickets. Phases 0–6 complete. Two tickets added to Phase 3 at the owner's request, both done:
 T3.7 and T3.8. Three dropped: the Bluetooth printing tickets T4.5–T4.7 (see
 below).
 
@@ -104,7 +103,7 @@ Android print sheet, which drives any printer Android can already see.
 
 - [x] **T6.1** — Build `db/backup.ts`: export SQLite DB + manifest to a single shareable file. *(Reads the format as well as writing it, so T6.3 restores something already known to parse.)*
 - [x] **T6.2** — Build "Backup Data" action in Settings, using share sheet (Drive, email, etc.). *(Includes the reminder added at the owner's request: a "Backed up N days ago" line in Settings and a Dashboard nudge once a backup is more than 14 days old.)*
-- [ ] **T6.3** — Build "Restore Data" flow: file picker, validation, DB replacement (with confirmation warning).
+- [x] **T6.3** — Build "Restore Data" flow: file picker, validation, DB replacement (with confirmation warning). *(Takes a snapshot of the current database before touching anything, and puts it back if the restored file will not open or cannot be read.)*
 
 ## Phase 7 — Polish & Non-Functional
 

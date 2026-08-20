@@ -2,6 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
+import { File } from 'expo-file-system';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
@@ -20,9 +21,17 @@ import {
 import StatePicker from '@/components/StatePicker';
 import { businessStateGstinMismatch, type BusinessDetails } from '@/constants/business';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import { createBackup } from '@/db/backup';
+import {
+  BackupFormatError,
+  createBackup,
+  previewRestore,
+  restoreBackup,
+  RestoreFailedError,
+} from '@/db/backup';
 import { getLastBackupAt, type BusinessSettingField } from '@/db/settings';
 import { describeBackupStatus } from '@/lib/backupStatus';
+import { formatDate } from '@/lib/format';
+import { useCartStore } from '@/store/cart';
 import { parseGstin } from '@/lib/gstin';
 import { deleteLogo, replaceLogo } from '@/lib/logo';
 import {
@@ -103,6 +112,28 @@ function toDraft(business: BusinessDetails): Draft {
   };
 }
 
+/**
+ * Keeps messages that were written to be read by the shop owner, and replaces
+ * anything internal with a plain sentence.
+ *
+ * `getDatabase()` throws "Database not initialised yet — await initDatabase()
+ * first". That is a note to a developer, and putting it on the screen of a
+ * first-time user standing at a counter tells them nothing they can act on —
+ * it just looks like the app has broken. `BackupFormatError` and
+ * `RestoreFailedError` are the two that are written for him, and they pass
+ * through unchanged.
+ *
+ * The original is logged rather than dropped, so it is still there in Metro
+ * while the app is being built.
+ */
+function ownerMessage(error: unknown, fallback: string): string {
+  if (error instanceof BackupFormatError || error instanceof RestoreFailedError) {
+    return error.message;
+  }
+  console.warn('[settings] showing a generic message for:', error);
+  return fallback;
+}
+
 export default function SettingsScreen() {
   const business = useSettingsStore(selectBusiness);
   const invoiceConfig = useSettingsStore(selectInvoiceConfig);
@@ -119,6 +150,7 @@ export default function SettingsScreen() {
   const [lastBackup, setLastBackup] = useState<string | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [backupError, setBackupError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
 
   // Re-seed if the store is reloaded underneath (a Phase 6 restore, say).
   useEffect(() => setDraft(toDraft(business)), [business]);
@@ -179,9 +211,7 @@ export default function SettingsScreen() {
     try {
       made = await createBackup();
     } catch (err) {
-      setBackupError(
-        err instanceof Error ? `The backup could not be made: ${err.message}` : 'The backup could not be made.'
-      );
+      setBackupError(ownerMessage(err, 'The backup could not be made. Please try again.'));
       setBackingUp(false);
       return;
     }
@@ -203,11 +233,80 @@ export default function SettingsScreen() {
     } catch (err) {
       // The backup itself succeeded — say so, and say what went wrong after.
       setBackupError(
-        `The backup was made, but sharing it failed: ${
-          err instanceof Error ? err.message : String(err)
-        }. Tap Back up again to retry.`
+        ownerMessage(
+          err,
+          'The backup was made, but it could not be shared. Tap Back up now to try sending it again.'
+        )
       );
     }
+  }, []);
+
+  /**
+   * Restore from a backup file (T6.3).
+   *
+   * Three steps, and the middle one is the point: pick the file, show what is
+   * actually in it beside what is on the phone, and only then replace anything.
+   * A confirmation reading "replace all your data?" is one nobody can answer
+   * safely — "replace 214 bills with the 198 in this backup from 12 August?"
+   * is one the owner can judge.
+   */
+  const restoreFromBackup = useCallback(async () => {
+    setBackupError(null);
+
+    const picked = await File.pickFileAsync({ mimeTypes: ['*/*'] });
+    if (picked.canceled || !picked.result) return;
+
+    let preview: Awaited<ReturnType<typeof previewRestore>>;
+    try {
+      preview = await previewRestore(picked.result.uri);
+    } catch (err) {
+      // Everything decodeBackup rejects arrives here already worded for the
+      // owner — wrong file, truncated, damaged, made by a newer app.
+      setBackupError(ownerMessage(err, 'That file could not be read as a backup.'));
+      return;
+    }
+
+    const { manifest, current } = preview;
+    const taken = new Date(manifest.createdAt);
+    const from = manifest.shopName ? `${manifest.shopName}, ` : '';
+
+    Alert.alert(
+      'Replace everything with this backup?',
+      `This backup was made on ${formatDate(taken)} and holds ${from}` +
+        `${manifest.counts.products} products and ${manifest.counts.bills} bills.\n\n` +
+        `This phone currently has ${current.products} products and ${current.bills} bills. ` +
+        'All of it will be replaced, including bills raised since the backup was made.\n\n' +
+        'This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Replace everything',
+          style: 'destructive',
+          onPress: async () => {
+            setRestoring(true);
+            try {
+              await restoreBackup(picked.result!.uri);
+
+              // The database underneath the app is a different one now. The
+              // settings store is holding the old shop's details, and the cart
+              // is holding product ids that may belong to nothing.
+              await useSettingsStore.getState().load();
+              useCartStore.getState().clear();
+              setLastBackup(await getLastBackupAt());
+
+              Alert.alert(
+                'Restored',
+                `${manifest.counts.products} products and ${manifest.counts.bills} bills are back.`
+              );
+            } catch (err) {
+              setBackupError(ownerMessage(err, 'The backup could not be restored.'));
+            } finally {
+              setRestoring(false);
+            }
+          },
+        },
+      ]
+    );
   }, []);
 
   const pickLogo = useCallback(async () => {
@@ -231,9 +330,7 @@ export default function SettingsScreen() {
       const uri = await replaceLogo(picked.assets[0].uri, business.logoPath);
       await saveBusiness({ logoPath: uri });
     } catch (err) {
-      setError(
-        err instanceof Error ? `The logo could not be saved: ${err.message}` : 'The logo could not be saved.'
-      );
+      setError(ownerMessage(err, 'The logo could not be saved. Please try again.'));
     } finally {
       setPickingLogo(false);
     }
@@ -287,7 +384,7 @@ export default function SettingsScreen() {
       await saveInvoiceConfig(invoiceDraft);
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(ownerMessage(err, 'Your details could not be saved. Please try again.'));
     } finally {
       setSaving(false);
     }
@@ -605,6 +702,30 @@ export default function SettingsScreen() {
             text="Send the file to Google Drive, or to yourself on WhatsApp. A backup kept only on this phone is lost with the phone."
           />
 
+          <Pressable
+            style={({ pressed }) => [styles.restoreButton, pressed && styles.logoButtonPressed]}
+            onPress={restoreFromBackup}
+            disabled={restoring || backingUp}
+            accessibilityRole="button"
+            accessibilityLabel="Replace everything on this phone with a backup file">
+            {restoring ? (
+              <ActivityIndicator color={Colors.brand} />
+            ) : (
+              <Ionicons name="cloud-download-outline" size={20} color={Colors.brand} />
+            )}
+            <Text style={styles.restoreButtonText}>
+              {restoring ? 'Restoring…' : 'Restore from a backup'}
+            </Text>
+          </Pressable>
+
+          {/* Said before it is tapped, not only in the confirmation. Someone
+              reaching for Restore usually wants their data back, and does not
+              always realise that what is on the phone now goes in its place. */}
+          <Note
+            tone="warning"
+            text="Restoring replaces everything on this phone — including any bills raised since that backup was made."
+          />
+
           {backupError ? <Note tone="warning" text={backupError} /> : null}
         </Section>
 
@@ -840,6 +961,18 @@ const styles = StyleSheet.create({
   },
   backupButtonPressed: { backgroundColor: Colors.brandDark },
   backupButtonText: { fontSize: FontSizes.body, fontWeight: '700', color: '#FFFFFF' },
+  restoreButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+    minHeight: Spacing.minTapTarget,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.brand,
+  },
+  restoreButtonText: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.brand },
   logoRemoveText: { color: Colors.outOfStock },
   logoPicker: {
     flexDirection: 'row',
