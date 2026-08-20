@@ -197,19 +197,27 @@ export async function getBillByInvoiceNumber(
   return getBillById(bill.id, db);
 }
 
-/** Bill headers only, newest first — the History list (T5.5) does not need items. */
-export async function listBills(
-  options: BillListOptions = {},
-  db: SQLiteDatabase = getDatabase()
-): Promise<BillRow[]> {
+/**
+ * Turns the caller's filters into a WHERE clause and its parameters.
+ *
+ * Shared by `listBills` and `summariseBills` so the History screen's count and
+ * total describe exactly the rows it is showing. Two copies of this would drift,
+ * and the way that shows up is a heading reading "42 bills" above a list of 38 —
+ * which reads as bills having gone missing.
+ */
+function buildBillFilter(options: BillListOptions): {
+  clause: string;
+  params: (string | number)[];
+} {
   const where: string[] = [];
   const params: (string | number)[] = [];
 
   if (options.search?.trim()) {
     const term = `%${escapeLike(options.search.trim())}%`;
     where.push(
-      `(customer_name LIKE ? ESCAPE '\\' OR customer_phone LIKE ? ESCAPE '\\'` +
-        ` OR invoice_number LIKE ? ESCAPE '\\')`
+      `(customer_name LIKE ? ESCAPE '${LIKE_ESCAPE}'` +
+        ` OR customer_phone LIKE ? ESCAPE '${LIKE_ESCAPE}'` +
+        ` OR invoice_number LIKE ? ESCAPE '${LIKE_ESCAPE}')`
     );
     params.push(term, term, term);
   }
@@ -224,9 +232,17 @@ export async function listBills(
     params.push(endOfLocalDay(options.to).toISOString());
   }
 
-  let sql = 'SELECT * FROM bills';
-  if (where.length > 0) sql += ` WHERE ${where.join(' AND ')}`;
-  sql += ' ORDER BY date DESC, id DESC';
+  return { clause: where.length > 0 ? ` WHERE ${where.join(' AND ')}` : '', params };
+}
+
+/** Bill headers only, newest first — the History list (T5.5) does not need items. */
+export async function listBills(
+  options: BillListOptions = {},
+  db: SQLiteDatabase = getDatabase()
+): Promise<BillRow[]> {
+  const { clause, params } = buildBillFilter(options);
+
+  let sql = `SELECT * FROM bills${clause} ORDER BY date DESC, id DESC`;
 
   if (options.limit !== undefined) {
     sql += ' LIMIT ?';
@@ -238,6 +254,30 @@ export async function listBills(
   }
 
   return db.getAllAsync<BillRow>(sql, params);
+}
+
+/**
+ * How many bills match a filter, and what they come to (T5.5).
+ *
+ * `limit` and `offset` are deliberately ignored: this describes the whole
+ * matching set, not the page currently on screen. Totalling the loaded page
+ * instead would give a figure that climbs as the list is scrolled — worse than
+ * showing nothing, because it looks authoritative and is wrong until the last
+ * page has loaded.
+ *
+ * Distinct from `getSalesSummary`, which takes only dates. This one also honours
+ * the search term, so what a particular customer has spent is a search away.
+ */
+export async function summariseBills(
+  options: BillListOptions = {},
+  db: SQLiteDatabase = getDatabase()
+): Promise<SalesSummary> {
+  const { clause, params } = buildBillFilter(options);
+  const row = await db.getFirstAsync<{ bill_count: number; total: number | null }>(
+    `SELECT COUNT(*) AS bill_count, SUM(grand_total) AS total FROM bills${clause}`,
+    params
+  );
+  return { billCount: row?.bill_count ?? 0, total: row?.total ?? 0 };
 }
 
 /** Recent bills for the Dashboard (T5.3). */
@@ -351,6 +391,23 @@ function endOfLocalDay(date: Date): Date {
   return copy;
 }
 
+/**
+ * The LIKE escape character.
+ *
+ * Named rather than spelled inline, because it has to appear in two places
+ * that must agree — the SQL `ESCAPE` clause and the escaping below — and
+ * because a backslash inside a template literal needs doubling. Written with
+ * one, `ESCAPE '\'` compiles to `ESCAPE ''` and SQLite rejects the whole
+ * query: "ESCAPE expression must be a single character". That is what it did
+ * from T1.4 until the History screen first passed a search term.
+ */
+const LIKE_ESCAPE = '\\';
+
+/**
+ * Makes a customer's own text literal inside a LIKE pattern. A shop called
+ * "100% Traders" would otherwise match every bill, and a name with an
+ * underscore would match any character in its place.
+ */
 function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
+  return value.replace(/[\\%_]/g, (match) => `${LIKE_ESCAPE}${match}`);
 }

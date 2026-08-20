@@ -6,9 +6,9 @@
 
 **How to use this:** Hand these one at a time, roughly in order. Each ticket is scoped to be independently buildable and testable. Check off as completed.
 
-**Status:** 36 of 59 tickets. Phases 0–3 complete; Phase 4 complete except
-Bluetooth printing (T4.5–T4.7, blocked); Phase 5 half done (T5.1–T5.4). Two tickets added to
-Phase 3 at the owner's request, both done: T3.7 and T3.8.
+**Status:** 38 of 59 tickets. Phases 0–3 and 5 complete; Phase 4 complete
+except Bluetooth printing (T4.5–T4.7, blocked). Two tickets added to Phase 3 at
+the owner's request, both done: T3.7 and T3.8.
 
 The app takes a sale end to end — search stock, build a cart, capture the
 customer, compute GST, write a numbered bill that decrements inventory, then
@@ -84,8 +84,8 @@ render it as a GST invoice to share on WhatsApp or print.
 - [x] **T5.2** — Build "New Bill" primary action button → routes to Billing screen.
 - [x] **T5.3** — Build recent bills list on Dashboard (last 5).
 - [x] **T5.4** — Build low-stock alert banner with tap-through to filtered Inventory view.
-- [ ] **T5.5** — Build History screen: full chronological bill list, search by customer/phone/invoice number, date range filter.
-- [ ] **T5.6** — Wire up tapping a past bill to reopen Bill Result screen (re-share/re-print).
+- [x] **T5.5** — Build History screen: full chronological bill list, search by customer/phone/invoice number, date range filter. *(The date range is offered as presets — All / Today / Last 7 days / This month / Last month. `listBills` takes an arbitrary from/to, so a custom picker is an addition rather than a rewrite.)*
+- [x] **T5.6** — Wire up tapping a past bill to reopen Bill Result screen (re-share/re-print). *(No separate work: the Bill Result screen and its route were built in T4.3/T4.4, and both the Dashboard's recent list and the History rows push to it.)*
 
 ## Phase 6 — Backup & Restore
 

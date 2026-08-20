@@ -218,7 +218,6 @@ export default function DashboardScreen() {
         )}
       </View>
 
-      <Text style={styles.footnote}>The low-stock shortcut comes next.</Text>
     </ScrollView>
   );
 }
@@ -349,10 +348,4 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
 
-  footnote: {
-    fontSize: FontSizes.small,
-    color: Colors.textMuted,
-    textAlign: 'center',
-    paddingTop: Spacing.sm,
-  },
 });

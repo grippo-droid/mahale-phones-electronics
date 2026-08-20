@@ -424,6 +424,62 @@ confirmation of the shop's existing signage/branding.
   invoice. It is read from the cart line's HSN **snapshot**, not re-queried from
   the product, because the snapshot is what `bill_items` stores and therefore
   what actually reaches the invoice. It warns; it never blocks.
+- **The `ESCAPE` clause needs a doubled backslash, and the character has one
+  definition.** `ESCAPE ''` written with a single backslash inside a template
+  literal compiles to `ESCAPE ''`, and SQLite rejects the entire query —
+  *"ESCAPE expression must be a single character"*. `db/bills.ts` shipped that
+  way from T1.4 and nothing noticed, because nothing passed `listBills` a search
+  term until the History screen did. `LIKE_ESCAPE` now holds the character once,
+  used by both the SQL and `escapeLike`, so the two cannot disagree. The
+  escaping itself matters: a customer called "100% Traders" would otherwise
+  match every bill in the shop.
+- **History's count and total describe the whole filter, never the loaded
+  page.** `summariseBills` runs the same WHERE clause as an aggregate, built by
+  the same `buildBillFilter` as `listBills`. Adding up the rows in memory would
+  give a figure that climbs as the list is scrolled — worse than showing
+  nothing, because it looks authoritative and is wrong until the last page
+  loads. It is also what makes searching a phone number and reading off what
+  that customer has spent actually work. It deliberately ignores `limit` and
+  `offset`.
+- **The date filter is presets, not a two-date picker.** All / Today / Last 7
+  days / This month / Last month. A spinner picker is two fiddly dialogs to
+  answer a question that is nearly always one of those five, and it would mean
+  a new native dependency. The month presets are not arbitrary: GST returns are
+  filed per calendar month, so "Last month" is exactly the set of bills that
+  goes on the return. `listBills` still takes an arbitrary `from`/`to`, so a
+  custom range is an addition rather than a rewrite.
+- **"Last 7 days" rather than "This week".** A calendar week needs a start day
+  and there is no answer that is right everywhere — Monday is the business
+  convention, Sunday is what `en-IN` says. A rolling seven days has no
+  convention to get wrong.
+- **Month ranges are anchored to day 1, never to today's day-of-month.**
+  Subtracting a month while keeping the day is the classic date bug: on 31
+  March it lands on 3 March. `resolveRange` builds `new Date(y, m - 1, 1)` and
+  finds the end with day 0 of the next month, which needs no month-length table
+  and handles February in a leap year.
+- **History rows are grouped under a sticky day heading.** The day is what the
+  owner searches by, and a heading says it once instead of every row repeating
+  it. The heading carries an explicit opaque background — a sticky header that
+  is transparent lets rows scroll through its text. Grouping works by collapsing
+  *consecutive* same-day rows, which is only correct because `listBills` orders
+  by date; the test asserts no day ever gets two headings.
+- **The full-screen spinner on History is for the first load only.** Changing a
+  filter keeps the old list on screen until the new one arrives. These are local
+  SQLite reads over a few hundred rows, so blanking the list to a spinner on
+  every keystroke of a debounced search would be all flicker and no information.
+- **Every History query carries a request id, and stale replies are dropped.**
+  Type "ram" and clear it, and two queries are in flight; whichever is slower
+  wins. Without the guard the emptied search box can end up showing Ramesh's
+  bills, which reads as the search being broken. The same id also stops a
+  page-two response from being appended to a list that a filter change has
+  already replaced.
+- **`useFocusEffect` is History's only loader.** It fires on first focus and
+  again whenever the search term or date range changes, so a second `useEffect`
+  is not redundancy but a double fetch. Reloading on every visit does reset
+  paging — the cost is losing your place if you were scrolled deep into last
+  year — but the far commoner case is raising a bill and coming here to check it
+  saved, and a History screen that does not show the bill just made is the worse
+  of the two failures.
 
 ## Open decisions (from the planning docs)
 

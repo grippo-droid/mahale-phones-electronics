@@ -61,3 +61,37 @@ export function formatBillWhen(value: string | Date, now: Date = new Date()): st
 
   return formatDate(date);
 }
+
+/** Clock time alone, e.g. 3:45 pm. */
+export function formatTime(value: string | Date): string {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+}
+
+/**
+ * The day a bill falls on, as a heading over the bills raised that day (T5.5).
+ *
+ * Deliberately not `formatBillWhen`: that one carries a time, which is right on
+ * a row and wrong on a heading — the heading is what all the rows beneath it
+ * have in common, and each row shows its own time.
+ *
+ * The weekday is included on older dates because a shop's week has a shape.
+ * "Sunday" explains a short day at a glance in a way "17/08/2026" does not.
+ */
+export function formatBillDay(value: string | Date, now: Date = new Date()): string {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return '';
+
+  if (isSameLocalDay(date, now)) return 'Today';
+
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  if (isSameLocalDay(date, yesterday)) return 'Yesterday';
+
+  return date.toLocaleDateString('en-IN', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
