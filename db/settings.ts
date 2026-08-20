@@ -22,6 +22,14 @@ export const SETTING_KEYS = {
   invoiceNumberFormat: 'invoice_number_format',
   invoiceResetPolicy: 'invoice_reset_policy',
   invoiceStartNumber: 'invoice_start_number',
+  /**
+   * When a backup file was last created (T6.2).
+   *
+   * A row in `app_settings` rather than a file timestamp, so it survives the
+   * local copies being pruned or cleared — and so it travels in the backup
+   * itself, which is right: a restored phone genuinely was backed up then.
+   */
+  lastBackupAt: 'last_backup_at',
 } as const;
 
 /**
@@ -240,3 +248,31 @@ export async function setBusinessDetails(
 // module's defaults and validation, and this file must not import it back —
 // `lib/invoiceNumber.ts` already imports from here, and a cycle between the two
 // leaves one of them half-initialised at startup.
+
+/**
+ * When a backup was last created, as stored (T6.2). Null if never.
+ *
+ * Read as a raw string rather than a Date so the caller decides what an
+ * unparseable value means — `describeBackupStatus` treats it as no backup at
+ * all, which is the safe reading.
+ */
+export async function getLastBackupAt(
+  db: SQLiteDatabase = getDatabase()
+): Promise<string | null> {
+  return getSetting(SETTING_KEYS.lastBackupAt, db);
+}
+
+/**
+ * Records that a backup file was made.
+ *
+ * Note what this does and does not claim: a file exists on the phone. Whether
+ * it reached Google Drive is not knowable from here — Android reports that the
+ * share sheet closed, not that the transfer succeeded — so nothing in the UI
+ * built on this may say the data is safe. See `lib/backupStatus.ts`.
+ */
+export async function setLastBackupAt(
+  when: Date = new Date(),
+  db: SQLiteDatabase = getDatabase()
+): Promise<void> {
+  await setSetting(SETTING_KEYS.lastBackupAt, when.toISOString(), db);
+}

@@ -14,7 +14,9 @@ import {
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { getRecentBills, getSalesSummary } from '@/db/bills';
 import type { BillRow } from '@/db/schema';
-import { countLowStockProducts } from '@/db/products';
+import { countLowStockProducts, countProducts } from '@/db/products';
+import { getLastBackupAt } from '@/db/settings';
+import { describeBackupStatus } from '@/lib/backupStatus';
 import { formatBillWhen, formatRupees } from '@/lib/format';
 import { selectItemCount, useCartStore } from '@/store/cart';
 import { selectBusiness, useSettingsStore } from '@/store/settings';
@@ -40,6 +42,9 @@ type Stats = {
   todayBills: number;
   monthTotal: number;
   lowStock: number;
+  lastBackupAt: string | null;
+  /** Whether there is anything worth backing up yet. */
+  hasData: boolean;
 };
 
 /** Midnight on the first of the current month, in local time. */
@@ -60,13 +65,15 @@ export default function DashboardScreen() {
   const load = useCallback(async () => {
     try {
       const now = new Date();
-      const [today, month, lowStock, recentBills] = await Promise.all([
+      const [today, month, lowStock, recentBills, lastBackupAt, productCount] = await Promise.all([
         // Both ends are today: getSalesSummary widens them to the local day, so
         // a bill raised at 9pm counts towards that evening and not tomorrow.
         getSalesSummary(now, now),
         getSalesSummary(startOfMonth(now), now),
         countLowStockProducts(),
         getRecentBills(RECENT_BILL_COUNT),
+        getLastBackupAt(),
+        countProducts(),
       ]);
 
       setStats({
@@ -74,6 +81,12 @@ export default function DashboardScreen() {
         todayBills: today.billCount,
         monthTotal: month.total,
         lowStock,
+        lastBackupAt,
+        // Products count as well as bills: an evening spent entering three
+        // hundred items is worth protecting before the first sale is made.
+        // recentBills rather than the month total — a shop whose last sale was
+        // in December still has everything to lose in January.
+        hasData: productCount > 0 || recentBills.length > 0,
       });
       setRecent(recentBills);
       setError(null);
@@ -100,6 +113,10 @@ export default function DashboardScreen() {
 
   const shopName = business.name.startsWith('PLACEHOLDER') ? 'Your shop' : business.name;
   const lowStock = stats?.lowStock ?? 0;
+  const backup = describeBackupStatus(stats?.lastBackupAt ?? null);
+  // A fresh install has nothing to lose, and a nudge with nothing behind it is
+  // the fastest way to teach someone to ignore the next one.
+  const nudgeBackup = backup.overdue && (stats?.hasData ?? false);
 
   if (loading && !stats) {
     return (
@@ -196,6 +213,25 @@ export default function DashboardScreen() {
             <Text style={styles.lowBannerSub}>Tap to see them</Text>
           </View>
           <Ionicons name="chevron-forward" size={20} color={Colors.lowStock} />
+        </Pressable>
+      ) : null}
+
+      {/* Shown only once a backup is genuinely overdue, and never alongside a
+          fresh one. The low-stock banner above is about today's trading; this
+          is about the shop's records existing at all, so it sits below it —
+          urgent, but not more urgent than a customer standing at the counter. */}
+      {nudgeBackup ? (
+        <Pressable
+          style={({ pressed }) => [styles.backupNudge, pressed && styles.backupNudgePressed]}
+          onPress={() => router.navigate('/settings')}
+          accessibilityRole="button"
+          accessibilityLabel={`${backup.nudge}. Open Settings to back up now.`}>
+          <Ionicons name="cloud-upload-outline" size={24} color={Colors.brand} />
+          <View style={styles.backupNudgeText}>
+            <Text style={styles.backupNudgeTitle}>{backup.nudge}</Text>
+            <Text style={styles.backupNudgeSub}>Tap to back up now</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={Colors.brand} />
         </Pressable>
       ) : null}
 
@@ -330,6 +366,22 @@ const styles = StyleSheet.create({
   lowBannerText: { flex: 1 },
   lowBannerTitle: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.lowStock },
   lowBannerSub: { fontSize: FontSizes.small, color: Colors.lowStock },
+
+  backupNudge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.md,
+    minHeight: Spacing.minTapTarget,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.brand,
+    backgroundColor: '#E8F0FB',
+  },
+  backupNudgePressed: { backgroundColor: '#D6E4F7' },
+  backupNudgeText: { flex: 1 },
+  backupNudgeTitle: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.brand },
+  backupNudgeSub: { fontSize: FontSizes.small, color: Colors.brand },
 
   monthRow: {
     flexDirection: 'row',

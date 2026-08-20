@@ -4,7 +4,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { getDatabase, getSchemaVersion } from './init';
 import { LATEST_SCHEMA_VERSION } from './schema';
-import { BUSINESS_SETTING_KEYS } from './settings';
+import { BUSINESS_SETTING_KEYS, setLastBackupAt } from './settings';
 
 /**
  * Backup export (T6.1).
@@ -411,6 +411,11 @@ export async function createBackup(
   file.write(encodeBackup(database, manifest));
 
   pruneOldBackups(file.uri);
+
+  // Recorded here rather than by the caller, because this is the one place
+  // that knows a backup file now exists. It claims nothing about the file
+  // having left the phone — see setLastBackupAt.
+  await setLastBackupAt(when, db);
 
   return { uri: file.uri, fileName, sizeBytes: file.size, manifest };
 }

@@ -534,6 +534,37 @@ confirmation of the shop's existing signage/branding.
   non-surrogate code point below U+10000.
 - **`expo-file-system` can pick files in SDK 57** — `File.pickFileAsync`. T6.3
   needs no `expo-document-picker` dependency.
+- **"Last backed up" means a file was created, not that it reached Drive.**
+  Android's share sheet reports that it was dismissed, never whether the
+  transfer succeeded, so the app cannot know. A timestamp claiming more than it
+  can prove is worse than none — it is exactly the reassurance that stops
+  someone checking. Hence the wording is "Last backup", never "your data is
+  safe", and the Settings section says plainly that a backup kept on the phone
+  is lost with the phone. A test asserts that reassuring wording stays out.
+- **A failed share is never reported as a failed backup.** The file is on disk
+  either way and `listBackups` keeps it for a retry, so the two steps report
+  separately: "the backup could not be made" returns before sharing is
+  attempted, while a sharing failure says the backup itself succeeded. The early
+  return is enforced by the compiler rather than by convention — `made` is
+  declared before the `try`, so using it after a catch that does not return is
+  "used before being assigned".
+- **The Dashboard nudge is gated on there being something to lose.** A fresh
+  install has never been backed up and so is technically overdue, but nagging
+  about an empty database is the fastest way to teach someone to ignore the next
+  banner. It needs at least one product or one bill — products count, because an
+  evening spent entering three hundred items is worth protecting before the
+  first sale. "Any bill" is read from the recent-bills query already on the
+  screen, not from the month total: a shop whose last sale was in December still
+  has everything to lose in January.
+- **Backup age is counted in calendar days, not elapsed hours.** A backup at
+  11pm reads as "yesterday" at 1am, matching how bills are dated everywhere
+  else. A timestamp in the future — a phone whose clock moved — reads as today
+  rather than as an enormous overdue figure.
+- **`last_backup_at` lives in `app_settings`, so it travels in the backup.**
+  That is right: a restored phone genuinely was backed up on that date. It
+  necessarily records the backup *before* the one being restored, since a file
+  cannot contain its own creation time — which errs towards nagging, the safe
+  direction.
 
 ## Open decisions (from the planning docs)
 

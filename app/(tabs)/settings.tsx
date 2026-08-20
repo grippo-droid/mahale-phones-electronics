@@ -1,7 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import * as Sharing from 'expo-sharing';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
@@ -18,7 +20,9 @@ import {
 import StatePicker from '@/components/StatePicker';
 import { businessStateGstinMismatch, type BusinessDetails } from '@/constants/business';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import type { BusinessSettingField } from '@/db/settings';
+import { createBackup } from '@/db/backup';
+import { getLastBackupAt, type BusinessSettingField } from '@/db/settings';
+import { describeBackupStatus } from '@/lib/backupStatus';
 import { parseGstin } from '@/lib/gstin';
 import { deleteLogo, replaceLogo } from '@/lib/logo';
 import {
@@ -112,6 +116,10 @@ export default function SettingsScreen() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [lastBackup, setLastBackup] = useState<string | null>(null);
+  const [backingUp, setBackingUp] = useState(false);
+  const [backupError, setBackupError] = useState<string | null>(null);
+
   // Re-seed if the store is reloaded underneath (a Phase 6 restore, say).
   useEffect(() => setDraft(toDraft(business)), [business]);
   useEffect(() => setInvoiceDraft(invoiceConfig), [invoiceConfig]);
@@ -120,6 +128,16 @@ export default function SettingsScreen() {
     setDraft((current) => ({ ...current, [field]: value }));
     setSaved(false);
   }, []);
+
+  // Re-read on focus rather than once: a backup can be made from here and the
+  // row is also carried in by a restore.
+  useFocusEffect(
+    useCallback(() => {
+      getLastBackupAt().then(setLastBackup).catch(() => setLastBackup(null));
+    }, [])
+  );
+
+  const backupStatus = useMemo(() => describeBackupStatus(lastBackup), [lastBackup]);
 
   const gstin = useMemo(() => parseGstin(draft.gstin), [draft.gstin]);
 
@@ -143,6 +161,54 @@ export default function SettingsScreen() {
     [invoiceDraft]
   );
   const invoicePreview = useMemo(() => previewInvoiceNumber(invoiceDraft), [invoiceDraft]);
+
+  /**
+   * Make a backup, then offer it to the share sheet (T6.2).
+   *
+   * The two steps are reported separately on purpose. Creating the file is the
+   * part that can fail for a reason worth showing; the share sheet closing tells
+   * us nothing — Android reports dismissal, not whether Drive accepted the file
+   * — so a cancelled share must not read as a failed backup. The file is on the
+   * phone either way, and `listBackups` keeps it for a retry.
+   */
+  const backUpNow = useCallback(async () => {
+    setBackupError(null);
+    setBackingUp(true);
+
+    let made: Awaited<ReturnType<typeof createBackup>>;
+    try {
+      made = await createBackup();
+    } catch (err) {
+      setBackupError(
+        err instanceof Error ? `The backup could not be made: ${err.message}` : 'The backup could not be made.'
+      );
+      setBackingUp(false);
+      return;
+    }
+
+    setLastBackup(made.manifest.createdAt);
+    setBackingUp(false);
+
+    try {
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(made.uri, {
+          mimeType: 'application/octet-stream',
+          dialogTitle: 'Send your backup somewhere safe',
+        });
+      } else {
+        setBackupError(
+          `The backup was saved on this phone as ${made.fileName}, but this phone has no way to share it.`
+        );
+      }
+    } catch (err) {
+      // The backup itself succeeded — say so, and say what went wrong after.
+      setBackupError(
+        `The backup was made, but sharing it failed: ${
+          err instanceof Error ? err.message : String(err)
+        }. Tap Back up again to retry.`
+      );
+    }
+  }, []);
 
   const pickLogo = useCallback(async () => {
     setError(null);
@@ -495,6 +561,53 @@ export default function SettingsScreen() {
           <Note tone="info" text="The logo is saved as soon as you choose it." />
         </Section>
 
+        {/* --- Backup --- */}
+        <Section
+          title="Backup"
+          subtitle="Everything — products, bills, invoice numbers and these settings.">
+          <View style={styles.backupStatusRow}>
+            <Ionicons
+              name={backupStatus.overdue ? 'alert-circle' : 'checkmark-circle'}
+              size={20}
+              color={backupStatus.overdue ? Colors.lowStock : Colors.inStock}
+            />
+            <Text
+              style={[styles.backupStatus, backupStatus.overdue && styles.backupStatusOverdue]}>
+              {backupStatus.label}
+            </Text>
+          </View>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.backupButton,
+              pressed && styles.backupButtonPressed,
+              backingUp && styles.saveButtonBusy,
+            ]}
+            onPress={backUpNow}
+            disabled={backingUp}
+            accessibilityRole="button"
+            accessibilityLabel="Make a backup and send it somewhere safe">
+            {backingUp ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Ionicons name="cloud-upload" size={20} color="#FFFFFF" />
+            )}
+            <Text style={styles.backupButtonText}>
+              {backingUp ? 'Making the backup…' : 'Back up now'}
+            </Text>
+          </Pressable>
+
+          {/* The one thing the owner has to understand about this feature. A
+              backup sitting on the phone is lost with the phone, so the share
+              step is the point of it, not an optional extra. */}
+          <Note
+            tone="info"
+            text="Send the file to Google Drive, or to yourself on WhatsApp. A backup kept only on this phone is lost with the phone."
+          />
+
+          {backupError ? <Note tone="warning" text={backupError} /> : null}
+        </Section>
+
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <Pressable
@@ -708,6 +821,25 @@ const styles = StyleSheet.create({
   },
   logoButtonPressed: { backgroundColor: Colors.surface },
   logoButtonText: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.brand },
+  backupStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    paddingBottom: Spacing.sm,
+  },
+  backupStatus: { fontSize: FontSizes.body, color: Colors.text, fontWeight: '600' },
+  backupStatusOverdue: { color: Colors.lowStock },
+  backupButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    minHeight: Spacing.minTapTarget,
+    borderRadius: 8,
+    backgroundColor: Colors.brand,
+  },
+  backupButtonPressed: { backgroundColor: Colors.brandDark },
+  backupButtonText: { fontSize: FontSizes.body, fontWeight: '700', color: '#FFFFFF' },
   logoRemoveText: { color: Colors.outOfStock },
   logoPicker: {
     flexDirection: 'row',
