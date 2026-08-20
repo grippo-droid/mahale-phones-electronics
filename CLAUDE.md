@@ -490,6 +490,51 @@ confirmation of the shop's existing signage/branding.
   away: "Open printable bill" renders the real PDF through the Android print
   sheet, which drives whatever printer Android can already see. Do not re-raise
   this as an open item or a blocked ticket.
+- **A backup is the raw SQLite file behind a two-line text header.** Magic line,
+  manifest as one line of JSON, then the database byte for byte. No zip (a new
+  dependency for a container with two members) and no base64 (a third larger,
+  and unopenable by anything but this app). What the format buys: the first two
+  lines can be read by opening the file in any text editor — which matters when
+  the owner is in another city and something has gone wrong — and the rest is a
+  real database a desktop tool can open if this app ever cannot.
+- **`db/backup.ts` both writes and reads the format.** A format that is only
+  ever written is not known to be readable, and discovering otherwise during
+  T6.3's restore, with the owner's only copy as the test case, is too late. The
+  test round-trips it: serialise, encode, decode, write the payload out and
+  reopen it with a different SQLite engine to read the shop back.
+- **Backups use `serializeAsync`, not a file copy.** The connection runs in WAL
+  mode, so a copy of the `.db` file can miss commits still sitting in the log.
+  SQLite's own serialize call gives a consistent snapshot; the
+  `wal_checkpoint(TRUNCATE)` before it is belt and braces.
+- **The checksum is FNV-1a and is not a signature.** It catches a truncated or
+  damaged file — an interrupted share, a cloud sync that mangled bytes — which
+  is the realistic failure. It proves nothing about who wrote the file, and
+  cannot: anyone editing a backup can recompute it. That is consistent with
+  Security & Access 5, which already says a backup is as sensitive as the phone
+  and is not encrypted.
+- **Every rejection is worded for the shop owner, and is a `BackupFormatError`.**
+  "Unexpected token < in JSON" tells them nothing about what to do next. The
+  checks run in the order that gives the most useful message: is it ours, can we
+  read this version, is the manifest intact, are all the bytes there, are they
+  undamaged, is it actually a database, is its schema one this build understands.
+  Restoring is the one unrecoverable thing this app can do, so anything doubtful
+  is refused before T6.3 ever sees it.
+- **Pruning never deletes the backup just written.** Only the newest three local
+  copies are kept, and "newest" means newest *by filename* — which carries the
+  phone's clock. A device with a wrong date, or one set back, writes a name that
+  sorts last, and naive pruning would delete the file it had just created,
+  reporting success with nothing to share. The just-written file is excluded
+  unconditionally rather than trusted to sort first. The local copies are only a
+  convenience for retrying a failed share; the real backup is the copy the owner
+  sends to Drive.
+- **UTF-8 is encoded by hand in `db/backup.ts`.** The manifest carries a byte
+  count that the decoder checks, so the encoding has to be the same everywhere
+  rather than whatever the runtime provides. Unpaired surrogates become U+FFFD
+  instead of producing invalid UTF-8. Verified against Node's encoder for every
+  non-surrogate code point below U+10000.
+- **`expo-file-system` can pick files in SDK 57** — `File.pickFileAsync`. T6.3
+  needs no `expo-document-picker` dependency.
+
 ## Open decisions (from the planning docs)
 
 - Exact registered business name, and the shop address (line 1, line 2, city,
