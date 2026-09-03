@@ -486,38 +486,35 @@ export async function inspectBackup(uri: string): Promise<ParsedBackup> {
 // ---------------------------------------------------------------------------
 
 /**
- * Why a restore copies rows instead of replacing the database file.
+ * Why a restore touches no files at all.
  *
- * The obvious implementation — close the connection, overwrite `mahale.db`,
- * reopen — silently does nothing on this platform, and was shipped and caught
- * on the phone doing exactly that: the restore reported success and the data
- * was unchanged.
+ * Two implementations of this failed on the owner's phone, and both failed for
+ * the same underlying reason: they went through the filesystem, and the
+ * filesystem is where this platform's surprises live.
  *
- * `SQLiteModule.kt` reference-counts connections. Its constructor looks for an
- * already-open database on the same path and, if it finds one, calls `addRef()`
- * and hands back the existing handle — a cache it keeps expressly "for fast
- * refresh". `closeAsync` mirrors that: it calls `release()` and only truly
- * closes when the count reaches zero. So a `closeAsync` need not close
- * anything. The old `sqlite3*` stays open on the old inode; deleting the file
- * only unlinks the name, and reopening returns that same cached handle, still
- * reading the file that was deleted. Nothing throws. Nothing changes.
+ *   1. **Close the connection and swap `mahale.db`.** It reported success and
+ *      changed nothing. `SQLiteModule.kt` reference-counts connections: the
+ *      constructor hands back an already-open handle for the same path (a cache
+ *      kept expressly "for fast refresh"), and `closeAsync` only releases a
+ *      reference, closing for real at zero. So the old `sqlite3*` stayed open on
+ *      the old inode, deleting the file only unlinked the name, and reopening
+ *      returned the same cached handle still reading the deleted file.
  *
- * So the file is never replaced. The incoming database is written to a staging
- * file, brought up to the current schema in its own right, then ATTACHed to the
- * live connection and copied in one transaction. That is immune to all of it —
- * no closing, no refcounts, no inodes, no `-wal` to clear — and it gets a
- * better guarantee for free: SQLite's transaction *is* the rollback. If the
- * copy fails at any point, the shop's data is exactly as it was, without any
- * snapshot having to be written back by hand.
+ *   2. **Stage the file and `ATTACH` it.** That needs a plain filesystem path,
+ *      and under Expo Go the document directory is scoped by experience id —
+ *      `.../ExperienceData/%40anonymous%2F<slug>/`. Whether the escaping is part
+ *      of the URI or part of the directory's actual name on disk decides whether
+ *      that string should be decoded, and it cannot be determined from here.
+ *
+ * So neither. `deserializeDatabaseAsync` opens the backup's bytes — which are
+ * already in memory, having just been read and checksummed — as a database in
+ * its own right, and `backupDatabaseAsync` is SQLite's Online Backup API, which
+ * copies one open connection's contents over another's. No file is written, no
+ * path is constructed, no connection is closed, and the question above stops
+ * mattering because nothing asks it.
+ *
+ * @see https://www.sqlite.org/backup.html
  */
-
-/** Tables copied by a restore, parents before children so foreign keys hold. */
-const RESTORED_TABLES = ['products', 'bills', 'bill_items', 'app_settings'] as const;
-
-/** Where the incoming database is staged. The document directory is writable. */
-const STAGING_DIRECTORY_NAME = 'restore-staging';
-
-const STAGING_DATABASE_NAME = 'incoming.db';
 
 /** What a restore would replace, and what with. */
 export type RestorePreview = {
@@ -553,18 +550,32 @@ async function countAllRows(db: SQLiteDatabase): Promise<BackupCounts> {
   return { products, bills, billItems, settings };
 }
 
-/**
- * How a failed restore left the phone.
- *
- * There is no `unrecovered` any more, and that is the point of the rewrite: the
- * copy runs inside a single transaction, so a failure leaves the shop's data
- * exactly as it was rather than needing a snapshot written back by hand.
- */
 export type RestoreOutcome =
-  /** The copy was rolled back by SQLite. Nothing on the phone changed. */
+  /** The copy did not happen. Nothing on the phone changed. */
   | 'untouched'
-  /** The copy committed, but the result does not match the backup. */
+  /** The copy ran, but the result does not match the backup. */
   | 'mismatch';
+
+/**
+ * Which part of a restore failed.
+ *
+ * Carried so the message can say where it broke. Both earlier failures of this
+ * feature showed up as "the restore did not work", and narrowing each one down
+ * cost a round trip to the phone. A restore opens a second database, migrates
+ * it and copies it over the live one; which of those refused is the only
+ * question worth asking first.
+ */
+export type RestoreStep = 'safety-copy' | 'open' | 'migrate' | 'copy' | 'count' | 'verify';
+
+/** Plain-language detail, appended to the outcome. */
+const STEP_DETAIL: Record<RestoreStep, string> = {
+  'safety-copy': 'A safety copy of your current data could not be saved first.',
+  open: 'The backup file could not be opened as a database.',
+  migrate: 'The backup could not be brought up to date with this version of the app.',
+  copy: 'The data could not be copied out of the backup.',
+  count: 'The restored data could not be counted afterwards.',
+  verify: 'The restored data did not match what the backup said it held.',
+};
 
 const RESTORE_OUTCOME_MESSAGES: Record<RestoreOutcome, string> = {
   untouched:
@@ -578,13 +589,17 @@ const RESTORE_OUTCOME_MESSAGES: Record<RestoreOutcome, string> = {
 export class RestoreFailedError extends Error {
   readonly outcome: RestoreOutcome;
 
+  /** Which part failed, so a report identifies itself without a stack trace. */
+  readonly step: RestoreStep;
+
   /** Whether the shop's own data is intact. */
   readonly rolledBack: boolean;
 
-  constructor(outcome: RestoreOutcome, options?: { cause?: unknown }) {
-    super(RESTORE_OUTCOME_MESSAGES[outcome], options);
+  constructor(outcome: RestoreOutcome, step: RestoreStep, options?: { cause?: unknown }) {
+    super(`${RESTORE_OUTCOME_MESSAGES[outcome]} ${STEP_DETAIL[step]}`, options);
     this.name = 'RestoreFailedError';
     this.outcome = outcome;
+    this.step = step;
     this.rolledBack = outcome === 'untouched';
   }
 }
@@ -592,66 +607,67 @@ export class RestoreFailedError extends Error {
 /**
  * The steps a restore is made of, injected so the failure paths can be tested.
  *
- * Every one of these touches the filesystem or the live connection, neither of
- * which exists in a test — but what happens when one fails is the whole safety
- * of the operation, and untested recovery code is code that has never run.
+ * Each one touches the live connection or a second database, neither of which
+ * exists in a test — but what happens when one fails is the whole safety of the
+ * operation, and untested recovery code is code that has never run.
  */
 export type RestoreIo = {
   /** Keeps a copy of the current data, in case something unforeseen happens. */
   keepSafetyCopy: () => Promise<void>;
-  /** Writes the incoming database where it can be opened, and returns its path. */
-  stageDatabase: (bytes: Uint8Array) => Promise<string>;
-  /** Brings the staged database up to the current schema, if it is older. */
-  migrateStaged: (path: string) => Promise<void>;
-  /** Copies every table across in one transaction. Throws having changed nothing. */
-  importFrom: (path: string) => Promise<void>;
+  /** Opens the backup's bytes as a database of their own. */
+  openIncoming: (bytes: Uint8Array) => Promise<SQLiteDatabase>;
+  /** Brings that database up to the current schema, if it is older. */
+  migrateIncoming: (incoming: SQLiteDatabase) => Promise<void>;
+  /** Copies it over the live database through SQLite's own backup API. */
+  copyIn: (incoming: SQLiteDatabase) => Promise<void>;
   /** What the live database holds now. */
   countRows: () => Promise<BackupCounts>;
-  discardStaged: (path: string) => void;
+  closeIncoming: (incoming: SQLiteDatabase) => Promise<void>;
 };
+
+/** Runs one step, labelling anything it throws with where it happened. */
+async function step<T>(name: RestoreStep, work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof RestoreFailedError) throw error;
+    throw new RestoreFailedError('untouched', name, { cause: error });
+  }
+}
 
 /**
  * Replaces the shop's data with a backup's.
  *
  * The counts are checked against the manifest afterwards, and that check is not
- * ceremony: the previous implementation reported success while changing
- * nothing, and passed its own verification because all that proved was that the
- * database could still be read. A restore that did not restore has to fail
- * loudly, or the owner finds out when they need the data.
+ * ceremony: an earlier implementation reported success while changing nothing,
+ * and passed its own verification because all that proved was that the database
+ * could still be read. A restore that did not restore has to fail loudly, or
+ * the owner finds out when they need the data.
  */
 export async function performRestore(
   database: Uint8Array,
   manifest: BackupManifest,
   io: RestoreIo
 ): Promise<void> {
-  let staged: string | null = null;
+  await step('safety-copy', () => io.keepSafetyCopy());
+
+  const incoming = await step('open', () => io.openIncoming(database));
 
   try {
-    await io.keepSafetyCopy();
+    await step('migrate', () => io.migrateIncoming(incoming));
+    await step('copy', () => io.copyIn(incoming));
 
-    staged = await io.stageDatabase(database);
-    await io.migrateStaged(staged);
-
-    try {
-      await io.importFrom(staged);
-    } catch (error) {
-      // SQLite rolled the transaction back, so the shop is where it started.
-      throw new RestoreFailedError('untouched', { cause: error });
-    }
-
-    const after = await io.countRows();
+    const after = await step('count', () => io.countRows());
     if (
       after.products !== manifest.counts.products ||
       after.bills !== manifest.counts.bills ||
       after.billItems !== manifest.counts.billItems
     ) {
-      throw new RestoreFailedError('mismatch');
+      throw new RestoreFailedError('mismatch', 'verify');
     }
-  } catch (error) {
-    if (error instanceof RestoreFailedError) throw error;
-    throw new RestoreFailedError('untouched', { cause: error });
   } finally {
-    if (staged !== null) io.discardStaged(staged);
+    // Left open, this is a whole copy of the shop's data held in memory.
+    await io.closeIncoming(incoming).catch(() => undefined);
   }
 }
 
@@ -660,45 +676,91 @@ const SAFETY_DIRECTORY_NAME = 'restore-safety';
 
 export const SAFETY_COPY_NAME = `before-restore${BACKUP_FILE_EXTENSION}`;
 
-/**
- * Column names shared by the same table in both databases, quoted for SQL.
- *
- * `INSERT INTO x SELECT * FROM restore.x` would be shorter, and would break the
- * day the two schemas differ in column *order* rather than content — which
- * `ALTER TABLE ADD COLUMN` makes possible without anyone noticing. Naming the
- * columns means a restore either copies the right values or fails outright.
- */
-async function sharedColumns(
-  db: SQLiteDatabase,
-  table: string,
-  attachedAs: string
-): Promise<string[]> {
-  const [live, staged] = await Promise.all([
-    db.getAllAsync<{ name: string }>(`PRAGMA table_info('${table}')`),
-    db.getAllAsync<{ name: string }>(`PRAGMA ${attachedAs}.table_info('${table}')`),
-  ]);
+function safetyDirectory(): Directory {
+  return new Directory(Paths.document, SAFETY_DIRECTORY_NAME);
+}
 
-  const stagedNames = new Set(staged.map((column) => column.name));
-  return live
-    .map((column) => column.name)
-    .filter((name) => stagedNames.has(name))
-    .map((name) => `"${name}"`);
+/** Offsets 18 and 19 of a SQLite file: the write and read format versions. */
+const HEADER_WRITE_VERSION = 18;
+const HEADER_READ_VERSION = 19;
+const JOURNAL_ROLLBACK = 1;
+const JOURNAL_WAL = 2;
+
+/**
+ * Clears the WAL flag in a backup's header, in place.
+ *
+ * The live database runs in WAL mode, and a database's journal mode is recorded
+ * in its own header — so every backup this app has ever written carries a WAL
+ * header, `wal_checkpoint(TRUNCATE)` notwithstanding. The checkpoint flushes the
+ * log; it does not change the mode.
+ *
+ * A restore deserialises those bytes into an **in-memory** database, and SQLite
+ * cannot run one of those in WAL mode: WAL needs a `-wal` file beside a database
+ * that, by construction, has no path. The first statement against it fails with
+ * SQLITE_CANTOPEN — surfacing as *"unable to open database file"*, which reads
+ * like a missing file and is really a mode the database cannot honour.
+ *
+ * Two bytes fix it. This is what SQLite itself writes when a database is taken
+ * out of WAL mode, and it is safe precisely because the backup was checkpointed
+ * before it was serialised: every committed page is already in the main file,
+ * so there is no log content to lose. It also repairs backups already sitting in
+ * the owner's Drive, which a fix applied at write time would not.
+ *
+ * Copies rather than writing in place, and the copy is not optional.
+ * `decodeBackup` returns the payload as a `subarray` — a *view* over the bytes
+ * read from the file, not a region of its own — so patching it in place reaches
+ * back through the view and edits the backup itself. The checksum is computed
+ * over those same bytes, so the next read of that file then rejects it as
+ * damaged: an undo that silently destroyed the copy it was meant to restore.
+ * Caught by restoring one file twice. Two bytes are not worth that.
+ */
+export function useRollbackJournal(bytes: Uint8Array): Uint8Array {
+  if (bytes.length <= HEADER_READ_VERSION) return bytes;
+  if (bytes[HEADER_WRITE_VERSION] !== JOURNAL_WAL && bytes[HEADER_READ_VERSION] !== JOURNAL_WAL) {
+    return bytes;
+  }
+
+  const copy = bytes.slice();
+  copy[HEADER_WRITE_VERSION] = JOURNAL_ROLLBACK;
+  copy[HEADER_READ_VERSION] = JOURNAL_ROLLBACK;
+  return copy;
+}
+
+/**
+ * The copy taken just before the last restore, if there is one.
+ *
+ * This file is written by every restore and read by nothing else, which for one
+ * release meant it was insurance nobody could claim: it sits outside `backups/`
+ * so pruning cannot take it, and that also keeps it out of `listBackups`, while
+ * the only other way into a restore is the system file picker — which does not
+ * show the app's own scoped directory. A safety net that cannot be reached from
+ * the screen is not a safety net.
+ *
+ * Returns null when no restore has ever run on this phone, which is the normal
+ * state and not an error. The caller shows the undo only when there is
+ * something to undo.
+ */
+export function findSafetyCopy(): File | null {
+  const directory = safetyDirectory();
+  if (!directory.exists) return null;
+
+  const file = new File(directory, SAFETY_COPY_NAME);
+  return file.exists ? file : null;
 }
 
 /** Builds the real steps, bound to the connection that is open right now. */
-export function fileSystemRestoreIo(db: SQLiteDatabase = getDatabase()): RestoreIo {
-  const stagingDirectory = () => new Directory(Paths.document, STAGING_DIRECTORY_NAME);
-
+export function sqliteRestoreIo(db: SQLiteDatabase = getDatabase()): RestoreIo {
   return {
     keepSafetyCopy: async () => {
       // An ordinary backup, in the ordinary format, so that if it is ever
       // needed it can be restored through this same flow rather than by hand.
-      const directory = new Directory(Paths.document, SAFETY_DIRECTORY_NAME);
+      // This is the one part of a restore that does touch a file — and it only
+      // writes, into the same directory the backup feature already writes to.
+      const directory = safetyDirectory();
       if (!directory.exists) directory.create({ intermediates: true });
 
       await db.execAsync('PRAGMA wal_checkpoint(TRUNCATE);');
       const bytes = await db.serializeAsync();
-      const counts = await countAllRows(db);
 
       const manifest: BackupManifest = {
         format: FORMAT_VERSION,
@@ -709,7 +771,7 @@ export function fileSystemRestoreIo(db: SQLiteDatabase = getDatabase()): Restore
         shopName: await shopNameFor(db),
         databaseBytes: bytes.length,
         checksum: checksum(bytes),
-        counts,
+        counts: await countAllRows(db),
       };
 
       const file = new File(directory, SAFETY_COPY_NAME);
@@ -718,108 +780,48 @@ export function fileSystemRestoreIo(db: SQLiteDatabase = getDatabase()): Restore
       file.write(encodeBackup(bytes, manifest));
     },
 
-    stageDatabase: async (bytes) => {
-      const directory = stagingDirectory();
-      if (!directory.exists) directory.create({ intermediates: true });
+    // The bytes are already in memory — they were read and checksummed a moment
+    // ago — so this needs no file, no path and no directory. They do need their
+    // journal mode neutralised first; see below.
+    openIncoming: (bytes) => SQLite.deserializeDatabaseAsync(useRollbackJournal(bytes)),
 
-      const file = new File(directory, STAGING_DATABASE_NAME);
-      if (file.exists) file.delete();
-      file.create();
-      file.write(bytes);
-
-      // Any sidecar left by a previous attempt would be replayed over the file
-      // that has just been written — the same trap as the live database's.
-      for (const suffix of ['-wal', '-shm']) {
-        const sidecar = new File(directory, `${STAGING_DATABASE_NAME}${suffix}`);
-        if (sidecar.exists) sidecar.delete();
-      }
-
-      return file.uri;
+    migrateIncoming: async (incoming) => {
+      // Off while the schema is being brought forward: an older backup may hold
+      // rows a newer constraint would reject mid-migration, and this database is
+      // a copy being prepared, not the shop's live data.
+      await incoming.execAsync('PRAGMA foreign_keys = OFF;');
+      await runMigrations(incoming);
     },
 
-    // Opened as a database in its own right so `runMigrations` can bring it
-    // forward, then closed. Opening by name and directory keeps expo-sqlite in
-    // charge of the path, and `useNewConnection` keeps it out of the connection
-    // cache that made replacing the file useless.
-    migrateStaged: async (path) => {
-      const { directory, name } = splitPath(fileSystemPath(path));
-      const staged = await SQLite.openDatabaseAsync(
-        name,
-        { useNewConnection: true },
-        directory
-      );
+    // SQLite's Online Backup API, between two open connections. The live
+    // database's contents are replaced by the copy's, page by page, inside a
+    // transaction the API manages — so a failure part way leaves the
+    // destination as it was rather than half-written.
+    copyIn: async (incoming) => {
+      await SQLite.backupDatabaseAsync({ sourceDatabase: incoming, destDatabase: db });
+
+      // The source was deliberately put into rollback-journal mode above, and
+      // a page-for-page copy includes page 1, which is where the journal mode
+      // lives. Whether the backup API carries that across to the destination or
+      // preserves the destination's own mode is not something the docs settle,
+      // so rather than depend on the answer, WAL is simply asked for again.
+      // Costless if it was never lost.
+      //
+      // Best-effort: the data is already in by this point, and refusing an
+      // otherwise good restore over a performance setting would be the wrong
+      // trade. `initDatabase` sets WAL on every open, so it self-heals on the
+      // next app start regardless.
       try {
-        await staged.execAsync('PRAGMA foreign_keys = OFF;');
-        await runMigrations(staged);
-      } finally {
-        await staged.closeAsync();
-      }
-    },
-
-    importFrom: async (path) => {
-      // ATTACH cannot run inside a transaction, so it brackets the copy.
-      await db.execAsync(`ATTACH DATABASE '${sqlLiteral(fileSystemPath(path))}' AS restore;`);
-
-      try {
-        await db.withExclusiveTransactionAsync(async (txn) => {
-          // Held over until the commit, so the tables can be emptied and filled
-          // in whatever order without a foreign key firing mid-way.
-          await txn.execAsync('PRAGMA defer_foreign_keys = ON;');
-
-          for (const table of [...RESTORED_TABLES].reverse()) {
-            await txn.execAsync(`DELETE FROM "${table}";`);
-          }
-
-          for (const table of RESTORED_TABLES) {
-            const columns = await sharedColumns(txn, table, 'restore');
-            if (columns.length === 0) {
-              throw new Error(`The backup has no usable "${table}" table.`);
-            }
-            const list = columns.join(', ');
-            await txn.execAsync(
-              `INSERT INTO "${table}" (${list}) SELECT ${list} FROM restore."${table}";`
-            );
-          }
-        });
-      } finally {
-        await db.execAsync('DETACH DATABASE restore;');
+        await db.execAsync("PRAGMA journal_mode = 'wal';");
+      } catch (error) {
+        console.warn('[backup] could not restore WAL mode after a restore:', error);
       }
     },
 
     countRows: () => countAllRows(db),
 
-    discardStaged: () => {
-      try {
-        const directory = stagingDirectory();
-        if (directory.exists) directory.delete();
-      } catch {
-        // A staging file left behind is overwritten by the next restore.
-      }
-    },
+    closeIncoming: (incoming) => incoming.closeAsync(),
   };
-}
-
-/**
- * Splits a path into the directory and file name expo-sqlite wants.
- *
- * Both separators are accepted. Android only ever produces forward slashes, but
- * the test harness runs on Windows, and a path helper that cannot be exercised
- * off the phone is one more thing only the owner's device can find wrong.
- */
-function splitPath(fullPath: string): { directory: string; name: string } {
-  const BACKSLASH = String.fromCharCode(92);
-  const at = Math.max(fullPath.lastIndexOf('/'), fullPath.lastIndexOf(BACKSLASH));
-  return { directory: fullPath.slice(0, at), name: fullPath.slice(at + 1) };
-}
-
-/** Strips the `file://` scheme; SQLite and expo-sqlite both take plain paths. */
-function fileSystemPath(uri: string): string {
-  return uri.startsWith('file://') ? decodeURI(uri.slice('file://'.length)) : uri;
-}
-
-/** Escapes a value for a single-quoted SQL literal. ATTACH cannot be parameterised. */
-function sqlLiteral(value: string): string {
-  return value.replace(/'/g, "''");
 }
 
 /**
@@ -828,10 +830,17 @@ function sqlLiteral(value: string): string {
  * Validation runs again here even though the screen has already previewed the
  * file. The preview and the restore are separated by however long the owner
  * spends reading the confirmation.
+ *
+ * The order of the first two lines is load-bearing when the file being restored
+ * IS the safety copy — the undo. `inspectBackup` reads the whole file into
+ * memory before `performRestore` runs, and `keepSafetyCopy` is the first thing
+ * `performRestore` does, overwriting that same file. Reading first means the
+ * undo is working from bytes it already holds, so overwriting the file it came
+ * from cannot pull the ground out from under it. Do not make this lazy.
  */
 export async function restoreBackup(
   uri: string,
-  io: RestoreIo = fileSystemRestoreIo()
+  io: RestoreIo = sqliteRestoreIo()
 ): Promise<BackupManifest> {
   const { manifest, database } = await inspectBackup(uri);
   await performRestore(database, manifest, io);

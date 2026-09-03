@@ -589,20 +589,56 @@ confirmation of the shop's existing signage/branding.
   stays open on the old inode, deleting the file only unlinks the name, and
   reopening hands back that same cached handle still reading the deleted file.
   Nothing throws. Nothing changes. **Never close and swap the database file.**
-- **The incoming database is staged, migrated in its own right, then ATTACHed
-  and copied in one transaction.** SQLite's transaction *is* the rollback: a
-  failure leaves the shop exactly as it was, with no snapshot to write back by
-  hand. No closing, no refcounts, no inodes, no `-wal` to clear. A safety copy
-  is still written to `restore-safety/` first, in the ordinary backup format so
-  it can be restored through the same flow rather than by a developer.
-- **Columns are named in the copy, never `SELECT *`.** `ALTER TABLE ADD COLUMN`
-  can leave two schemas with the same columns in a different order, and
-  `SELECT *` would then copy values into the wrong fields silently.
-  `sharedColumns` intersects `PRAGMA table_info` from both sides.
-- **Foreign keys are deferred for the copy** (`PRAGMA defer_foreign_keys = ON`),
-  so the tables can be emptied children-first and filled parents-first without
-  a constraint firing mid-transaction. `ATTACH` cannot run inside a
-  transaction, so it brackets it.
+- **A restore goes nowhere near the filesystem.** The staged-file-and-`ATTACH`
+  version failed too, for a second reason: `ATTACH` needs a plain filesystem
+  path, and under Expo Go the document directory is scoped by experience id —
+  `.../ExperienceData/%40anonymous%2F<slug>/`. Whether that escaping belongs to
+  the URI or is part of the directory's real name on disk decides whether the
+  string should be decoded, and that cannot be determined from the docs.
+  `decodeURI` also leaves `%2F` alone by definition, so the first attempt at
+  decoding produced a path with a literal `%2F` in it.
+  
+  So no path is built at all. `deserializeDatabaseAsync` opens the backup's
+  bytes — already in memory, just read and checksummed — as a database of
+  their own, and `backupDatabaseAsync` (SQLite's Online Backup API) copies one
+  open connection over another. No file, no path, no close. **Do not
+  reintroduce a staging file, an `ATTACH`, or any URI-to-path conversion.**
+- **The backup's WAL flag is cleared before its bytes are deserialised.** The
+  live database runs in WAL mode, journal mode is recorded in a database's own
+  header, and `wal_checkpoint(TRUNCATE)` flushes the log without changing the
+  mode — so every backup this app has ever written carries a WAL header. A
+  restore deserialises those bytes into an **in-memory** database, and SQLite
+  cannot run one of those in WAL mode: WAL needs a `-wal` file beside a database
+  that by construction has no path. The first statement fails SQLITE_CANTOPEN,
+  surfacing as *"unable to open database file"* — which reads like a missing
+  file and is really a mode that cannot be honoured. `useRollbackJournal` sets
+  header bytes 18 and 19 to 1, which is what SQLite itself writes when leaving
+  WAL mode, and is safe because the checkpoint already put every committed page
+  in the main file. Doing it at read time rather than at write time also repairs
+  the backups already in the owner's Drive.
+- **`useRollbackJournal` copies; it must never patch in place.**
+  `decodeBackup` returns the payload as a `subarray` — a *view* over the bytes
+  read from the file. Patched in place, the edit reaches back through the view
+  into the backup itself, and since the checksum covers those same bytes the
+  next read rejects that file as damaged. An undo would quietly destroy the copy
+  it was restoring. Found by restoring one file twice.
+- **WAL is re-asserted on the live connection after the copy.** A page-for-page
+  backup includes page 1, where the journal mode lives, and whether the API
+  carries the source's mode across or preserves the destination's is not
+  something the docs settle. Rather than depend on the answer, `copyIn` simply
+  asks for WAL again — costless if it was never lost, best-effort because the
+  data is already in by then and a performance setting is not worth failing a
+  good restore over.
+- **The incoming copy is migrated before it is copied in**, with foreign keys
+  off, so an older backup is brought forward. It is closed in a `finally` —
+  left open it is a whole second copy of the shop held in memory — and a
+  failure to close does not fail an otherwise successful restore.
+- **Every restore failure carries the step it failed at** (`RestoreStep`), named
+  in plain words in the message. Both failures of this feature on the phone
+  first showed as "the restore did not work", and narrowing each one down cost
+  a round trip. `ownerMessage` also logs every error including the ones shown
+  verbatim, because a `RestoreFailedError`'s `cause` is the only record of what
+  actually went wrong.
 - **A restore never closes the live connection at all**, which is what made the
   earlier "Database not initialised yet" failure possible: a refused write
   skipped the reopen and left the app with no database until it was
@@ -615,9 +651,6 @@ confirmation of the shop's existing signage/branding.
   are two outcomes left: `untouched` (the transaction rolled back, nothing
   changed) and `mismatch` (it committed but the result disagrees with the
   file).
-- **A stale `-wal` beside a *staged* file is still cleared.** The live database
-  is no longer touched, but a write-ahead log left by a previous restore
-  attempt would be replayed over the staging file that has just been written.
 - **`runMigrations` is exported from `db/init.ts`** so a restore can bring an
   older backup forward before its rows are copied, making the two schemas match.
 - **The restore steps are injected (`RestoreIo`) so the recovery path is
@@ -628,11 +661,33 @@ confirmation of the shop's existing signage/branding.
   paths, and that a failure before the close touches nothing.
 - **The confirmation compares the backup with the phone.** "Replace all your
   data?" is a question nobody can answer safely. It names the backup's date,
-  shop name and counts beside the current counts, says that bills raised since
-  the backup go too, and says it cannot be undone. The same warning is shown
-  before Restore is tapped, not only after — someone reaching for Restore wants
-  their data back and does not always realise what is on the phone goes in its
-  place.
+  shop name and counts beside the current counts, and says that bills raised
+  since the backup go too. The same warning is shown before Restore is tapped,
+  not only after — someone reaching for Restore wants their data back and does
+  not always realise what is on the phone goes in its place.
+- **"Undo last restore" is what makes the safety copy real.** Every restore
+  writes the current data to `restore-safety/before-restore.mpebak` first, and
+  for one release nothing could read it back: the file sits outside `backups/`
+  so pruning cannot take it, which also keeps it out of `listBackups`, and the
+  only other way into a restore is the system file picker — which does not show
+  the app's own scoped directory. A safety net that cannot be reached from the
+  screen is not a safety net. `findSafetyCopy()` returns the file or null, and
+  the button is rendered only when it is there, so a phone that has never
+  restored is not offered a way to undo nothing.
+- **The undo is the same operation on a different file.** `confirmAndRestore`
+  takes the uri and a `'file' | 'undo'` mode that changes the wording and
+  nothing else. Giving the undo its own copy of the confirmation would be two
+  restore paths to keep in step, the more dangerous of them reached least often
+  and so tested least.
+- **The confirmation no longer says "this cannot be undone",** because it can.
+  It says a copy of the current data is saved first. A warning that overstates
+  is one the owner learns to discount, and that costs more than it buys on the
+  next warning that is true.
+- **`restoreBackup` reads the whole file before `performRestore` touches
+  anything**, and that ordering is load-bearing for the undo specifically: the
+  file being restored IS the one `keepSafetyCopy` immediately overwrites. Read
+  lazily, the undo would restore the data it was meant to replace. Do not make
+  the read lazy; a negative control covers it.
 - **The file is validated again at restore time, not just at preview.** The two
   are separated by however long the owner spends reading the confirmation, and
   the second is the step that cannot be undone.

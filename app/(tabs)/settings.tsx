@@ -24,6 +24,7 @@ import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import {
   BackupFormatError,
   createBackup,
+  findSafetyCopy,
   previewRestore,
   restoreBackup,
   RestoreFailedError,
@@ -127,10 +128,15 @@ function toDraft(business: BusinessDetails): Draft {
  * while the app is being built.
  */
 function ownerMessage(error: unknown, fallback: string): string {
+  // Always logged, including the errors that are shown verbatim. A
+  // RestoreFailedError carries the real failure as its `cause`, and that is
+  // the only place the underlying reason exists — without this it is lost, and
+  // working out why a restore failed means another round trip to the phone.
+  console.warn('[settings] error:', error, 'cause:', (error as { cause?: unknown })?.cause);
+
   if (error instanceof BackupFormatError || error instanceof RestoreFailedError) {
     return error.message;
   }
-  console.warn('[settings] showing a generic message for:', error);
   return fallback;
 }
 
@@ -152,6 +158,11 @@ export default function SettingsScreen() {
   const [backupError, setBackupError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
 
+  // The undo is offered only when there is something to undo, so this is the
+  // presence of the safety copy rather than a flag we set ourselves — a flag
+  // would be a second record of the same fact, free to disagree with the file.
+  const [undoUri, setUndoUri] = useState<string | null>(null);
+
   // Re-seed if the store is reloaded underneath (a Phase 6 restore, say).
   useEffect(() => setDraft(toDraft(business)), [business]);
   useEffect(() => setInvoiceDraft(invoiceConfig), [invoiceConfig]);
@@ -161,12 +172,22 @@ export default function SettingsScreen() {
     setSaved(false);
   }, []);
 
+  const refreshUndo = useCallback(() => {
+    try {
+      setUndoUri(findSafetyCopy()?.uri ?? null);
+    } catch {
+      // Not being able to look is the same as there being nothing to offer.
+      setUndoUri(null);
+    }
+  }, []);
+
   // Re-read on focus rather than once: a backup can be made from here and the
   // row is also carried in by a restore.
   useFocusEffect(
     useCallback(() => {
       getLastBackupAt().then(setLastBackup).catch(() => setLastBackup(null));
-    }, [])
+      refreshUndo();
+    }, [refreshUndo])
   );
 
   const backupStatus = useMemo(() => describeBackupStatus(lastBackup), [lastBackup]);
@@ -242,50 +263,79 @@ export default function SettingsScreen() {
   }, []);
 
   /**
-   * Restore from a backup file (T6.3).
+   * The confirmation and the restore itself, shared by both ways in (T6.3).
    *
-   * Three steps, and the middle one is the point: pick the file, show what is
-   * actually in it beside what is on the phone, and only then replace anything.
-   * A confirmation reading "replace all your data?" is one nobody can answer
+   * The middle step is the point: pick the file, show what is actually in it
+   * beside what is on the phone, and only then replace anything. A
+   * confirmation reading "replace all your data?" is one nobody can answer
    * safely — "replace 214 bills with the 198 in this backup from 12 August?"
    * is one the owner can judge.
+   *
+   * `mode` changes the wording and nothing else. The undo is the same
+   * operation on a different file, and giving it its own copy of this would be
+   * two restore paths to keep in step — the more dangerous one being the one
+   * reached least often, and so tested least.
    */
-  const restoreFromBackup = useCallback(async () => {
-    setBackupError(null);
+  const confirmAndRestore = useCallback(
+    async (uri: string, mode: 'file' | 'undo') => {
+      setBackupError(null);
 
-    const picked = await File.pickFileAsync({ mimeTypes: ['*/*'] });
-    if (picked.canceled || !picked.result) return;
+      let preview: Awaited<ReturnType<typeof previewRestore>>;
+      try {
+        preview = await previewRestore(uri);
+      } catch (err) {
+        // Everything decodeBackup rejects arrives here already worded for the
+        // owner — wrong file, truncated, damaged, made by a newer app.
+        setBackupError(
+          ownerMessage(
+            err,
+            mode === 'undo'
+              ? 'The copy saved before the last restore could not be read.'
+              : 'That file could not be read as a backup.'
+          )
+        );
+        // It may have been removed underneath us; stop offering it if so.
+        if (mode === 'undo') refreshUndo();
+        return;
+      }
 
-    let preview: Awaited<ReturnType<typeof previewRestore>>;
-    try {
-      preview = await previewRestore(picked.result.uri);
-    } catch (err) {
-      // Everything decodeBackup rejects arrives here already worded for the
-      // owner — wrong file, truncated, damaged, made by a newer app.
-      setBackupError(ownerMessage(err, 'That file could not be read as a backup.'));
-      return;
-    }
+      const { manifest, current } = preview;
+      const taken = new Date(manifest.createdAt);
+      const from = manifest.shopName ? `${manifest.shopName}, ` : '';
 
-    const { manifest, current } = preview;
-    const taken = new Date(manifest.createdAt);
-    const from = manifest.shopName ? `${manifest.shopName}, ` : '';
+      const held =
+        `${manifest.counts.products} products and ${manifest.counts.bills} bills`;
+      const onPhone =
+        `This phone currently has ${current.products} products and ${current.bills} bills.`;
 
-    Alert.alert(
-      'Replace everything with this backup?',
-      `This backup was made on ${formatDate(taken)} and holds ${from}` +
-        `${manifest.counts.products} products and ${manifest.counts.bills} bills.\n\n` +
-        `This phone currently has ${current.products} products and ${current.bills} bills. ` +
-        'All of it will be replaced, including bills raised since the backup was made.\n\n' +
-        'This cannot be undone.',
-      [
+      // Both paths save a copy before they overwrite anything, so neither is
+      // the one-way door the first version of this warned it was.
+      const reversible =
+        'A copy of what is on this phone right now is saved first, so this can be put back.';
+
+      const title =
+        mode === 'undo'
+          ? 'Put back the data from before the last restore?'
+          : 'Replace everything with this backup?';
+
+      const body =
+        mode === 'undo'
+          ? `This is how the phone was on ${formatDate(taken)}, just before the last ` +
+            `restore: ${held}.\n\n${onPhone} All of it will be replaced, including ` +
+            `anything entered since that restore.\n\n${reversible}`
+          : `This backup was made on ${formatDate(taken)} and holds ${from}${held}.\n\n` +
+            `${onPhone} All of it will be replaced, ` +
+            `including bills raised since the backup was made.\n\n${reversible}`;
+
+      Alert.alert(title, body, [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Replace everything',
+          text: mode === 'undo' ? 'Put it back' : 'Replace everything',
           style: 'destructive',
           onPress: async () => {
             setRestoring(true);
             try {
-              await restoreBackup(picked.result!.uri);
+              await restoreBackup(uri);
 
               // The database underneath the app is a different one now. The
               // settings store is holding the old shop's details, and the cart
@@ -295,19 +345,48 @@ export default function SettingsScreen() {
               setLastBackup(await getLastBackupAt());
 
               Alert.alert(
-                'Restored',
-                `${manifest.counts.products} products and ${manifest.counts.bills} bills are back.`
+                mode === 'undo' ? 'Put back' : 'Restored',
+                `${held.charAt(0).toUpperCase()}${held.slice(1)} are back.`
               );
             } catch (err) {
               setBackupError(ownerMessage(err, 'The backup could not be restored.'));
             } finally {
+              // The restore has written a fresh safety copy, whatever the
+              // outcome — and if it failed before that point there may now be
+              // none. Either way the button's state is read from the file.
+              refreshUndo();
               setRestoring(false);
             }
           },
         },
-      ]
-    );
-  }, []);
+      ]);
+    },
+    [refreshUndo]
+  );
+
+  /** Restore from a file the owner picks — from Drive, WhatsApp, wherever. */
+  const restoreFromBackup = useCallback(async () => {
+    setBackupError(null);
+
+    const picked = await File.pickFileAsync({ mimeTypes: ['*/*'] });
+    if (picked.canceled || !picked.result) return;
+
+    await confirmAndRestore(picked.result.uri, 'file');
+  }, [confirmAndRestore]);
+
+  /**
+   * Undo the last restore.
+   *
+   * Every restore copies the current data to `restore-safety/` before it
+   * overwrites anything. Until this button existed that file could not be
+   * reached: it is deliberately outside `backups/` so pruning cannot take it,
+   * which also keeps it out of `listBackups`, and the picker above only sees
+   * places the system will show — not the app's own scoped directory.
+   */
+  const undoLastRestore = useCallback(async () => {
+    if (!undoUri) return;
+    await confirmAndRestore(undoUri, 'undo');
+  }, [confirmAndRestore, undoUri]);
 
   const pickLogo = useCallback(async () => {
     setError(null);
@@ -725,6 +804,30 @@ export default function SettingsScreen() {
             tone="warning"
             text="Restoring replaces everything on this phone — including any bills raised since that backup was made."
           />
+
+          {/* Shown only when a restore has actually run, so a phone that has
+              never restored is not offered a way to undo nothing. */}
+          {undoUri ? (
+            <>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.restoreButton,
+                  pressed && styles.logoButtonPressed,
+                ]}
+                onPress={undoLastRestore}
+                disabled={restoring || backingUp}
+                accessibilityRole="button"
+                accessibilityLabel="Put back the data from before the last restore">
+                <Ionicons name="arrow-undo-outline" size={20} color={Colors.brand} />
+                <Text style={styles.restoreButtonText}>Undo last restore</Text>
+              </Pressable>
+
+              <Note
+                tone="info"
+                text="Every restore saves a copy of what was on the phone first. This puts that copy back."
+              />
+            </>
+          ) : null}
 
           {backupError ? <Note tone="warning" text={backupError} /> : null}
         </Section>
