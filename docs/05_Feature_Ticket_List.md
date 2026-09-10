@@ -111,7 +111,7 @@ Android print sheet, which drives any printer Android can already see.
 - [ ] **T7.2** — Add confirmation dialogs for destructive actions (delete product, restore backup).
 - [ ] **T7.3** — Add success/error toasts or banners for key actions (bill generated, product saved, backup complete).
 - [ ] **T7.4** — Visual pass: apply color system, spacing, and typography per Frontend Spec.
-- [ ] **T7.5** — Test performance with a large seeded dataset (e.g., 3,000 products, 5,000 bills) to confirm no slowdowns.
+- [x] **T7.5** — Test performance with a large seeded dataset (e.g., 3,000 products, 5,000 bills) to confirm no slowdowns. *(Every screen's queries measured at that size; all but one were under a millisecond. "Frequently sold" on the Billing tab was scanning the whole `bill_items` table on every visit, so its cost grew with the shop's entire history rather than with the 90 days it reads — 1.8 ms at 2,300 rows, 155 ms at 689,000. Fixed by pinning the join order so the date index drives; flat at ~2 ms at every size.)*
 - [ ] **T7.6** — (If decided) Implement app-level PIN/biometric lock per Security & Access Document.
 - [ ] **T7.7** — (If decided) Implement SQLite encryption at rest per Security & Access Document.
 

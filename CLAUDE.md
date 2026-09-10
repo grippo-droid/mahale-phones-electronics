@@ -401,6 +401,20 @@ confirmation of the shop's existing signage/branding.
   `bill_items` row whose product was deleted has a NULL `product_id` and is
   dropped by the join — a product that no longer exists cannot be offered,
   while the bill it appeared on stays intact.
+- **The windowed "frequently sold" query pins its join order with `CROSS JOIN`,
+  and that is a performance fix, not a style choice.** Written as an ordinary
+  join, SQLite scans every row in `bill_items` and tests each against the date
+  filter, because with no statistics it cannot know the 90-day window is small.
+  That makes the Billing tab cost the shop's ENTIRE history on a screen that
+  only ever wants a quarter of it. Measured with the window held fixed at 2,304
+  items, it ran 1.8 ms at 2,304 total rows and 155 ms at 689,000 — on a desktop;
+  a phone is several times slower again. `CROSS JOIN` is SQLite's documented way
+  to say "keep these tables in this order", so `idx_bills_date` drives and only
+  the window is read; cost then stays flat at ~2 ms however much history piles
+  up. `ANALYZE` fixes the plan too, but nothing in this app runs it and its
+  statistics go stale as the shop bills; pinning the order needs neither. The
+  all-time branch deliberately keeps the ordinary join — with no window every
+  row is wanted, and scanning `bill_items` really is cheapest there.
 - **Out-of-stock products stay in the quick list, showing their stock.**
   Overselling is allowed everywhere else; hiding a product because the recorded
   count says zero would contradict that. The stock figure makes the tap an
