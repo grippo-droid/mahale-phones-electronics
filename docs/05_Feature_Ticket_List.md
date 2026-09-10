@@ -79,6 +79,7 @@ Android print sheet, which drives any printer Android can already see.
 - [x] **T3.6** — Wire up "Generate Bill": write bill + bill_items to DB, decrement product stock.
 - [x] **T3.7** — Add category filter chips to the Billing screen, so products can be browsed by category instead of always typing a search. *(Added after Phase 5 began, at the owner's request.)*
 - [x] **T3.8** — Add a "Frequently sold" section shown by default on the Billing screen: top 12 products by units sold over the last 90 days, falling back to all-time and then to all products grouped by category when there is not enough sales history. Out-of-stock items are included, with their stock shown.
+- [x] **T3.9** — Add a Unit field to bill lines: a fixed choice of Meter, Box, Pieces or Feet, picked per line on the Billing screen and printed beside the quantity on the invoice and the on-screen bill ("5 Mtr", "2 Box", "10 Pcs", "3 Feet"). Per bill line rather than per product, and optional — bills raised before it existed, and lines where none was chosen, print the bare quantity exactly as they always did. *(Added after Phase 7 began, at the owner's request. Migration 005; no change to the backup file format.)*
 
 ## Phase 4 — Bill Output (PDF, Share, Print)
 

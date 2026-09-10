@@ -18,6 +18,7 @@ import { stateCodeFor } from '@/constants/states';
 import { getBillById, setBillPdfPath, type BillWithItems } from '@/db/bills';
 import { formatDate, formatRupees } from '@/lib/format';
 import { rupeesInWords } from '@/lib/numberToWords';
+import { formatQuantity } from '@/lib/units';
 import {
   buildBillHtml,
   existingBillPdf,
@@ -245,7 +246,8 @@ export default function BillResultScreen() {
                   {index + 1}. {item.product_name_snapshot}
                 </Text>
                 <Text style={styles.muted}>
-                  {item.qty} × {formatRupees(item.taxable_value / Math.max(item.qty, 1))}
+                  {formatQuantity(item.qty, item.unit)} ×{' '}
+                  {formatRupees(item.taxable_value / Math.max(item.qty, 1))}
                   {'  ·  '}
                   {item.gst_rate_snapshot}% GST
                   {item.hsn_code_snapshot ? `  ·  HSN ${item.hsn_code_snapshot}` : ''}

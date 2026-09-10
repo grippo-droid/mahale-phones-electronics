@@ -59,6 +59,7 @@ export function buildNewBill(
       product_name_snapshot: line.name,
       hsn_code_snapshot: line.hsnCode,
       qty: line.qty,
+      unit: line.unit,
       unit_price_snapshot: line.unitPrice,
       gst_rate_snapshot: line.gstRate,
       taxable_value: computed.taxableValue,

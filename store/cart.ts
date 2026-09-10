@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import type { Product } from '@/db/products';
 import { EMPTY_CUSTOMER, type Customer, type CustomerField } from '@/lib/customer';
+import type { BillUnit } from '@/lib/units';
 
 /**
  * The bill in progress (T3.3).
@@ -39,6 +40,12 @@ export type CartLine = {
   gstRate: number;
   priceIncludesGst: boolean;
   qty: number;
+  /**
+   * How the quantity is measured, or null when none has been chosen. Null is
+   * the starting state on purpose: the unit is a statement about the sale, and
+   * an unasked-for default would put one on the invoice by accident.
+   */
+  unit: BillUnit | null;
 };
 
 type CartState = {
@@ -47,6 +54,8 @@ type CartState = {
   /** Adds the product, or bumps the quantity if it is already on the bill. */
   addProduct: (product: Product) => void;
   setQty: (productId: number, qty: number) => void;
+  /** Pass null to clear it — tapping the chosen unit again unsets it. */
+  setUnit: (productId: number, unit: BillUnit | null) => void;
   changeQty: (productId: number, delta: number) => void;
   removeLine: (productId: number) => void;
   setCustomerField: (field: CustomerField, value: string) => void;
@@ -96,6 +105,7 @@ export const useCartStore = create<CartState>((set) => ({
             gstRate: product.gst_rate,
             priceIncludesGst: product.priceIncludesGst,
             qty: 1,
+            unit: null,
           },
         ],
       };
@@ -105,6 +115,13 @@ export const useCartStore = create<CartState>((set) => ({
     set((state) => ({
       lines: state.lines.map((line) =>
         line.productId === productId ? { ...line, qty: normaliseQty(qty) } : line
+      ),
+    })),
+
+  setUnit: (productId, unit) =>
+    set((state) => ({
+      lines: state.lines.map((line) =>
+        line.productId === productId ? { ...line, unit } : line
       ),
     })),
 

@@ -434,6 +434,34 @@ confirmation of the shop's existing signage/branding.
   combine in the query, and one control (`backToBill`) clears both. Leaving the
   user to work out that two separate things need clearing to see the bill again
   would be needless.
+- **The unit on a bill line belongs to the sale, not to the product.** The same
+  cable goes out by the meter to one customer and by the box to another, so
+  `bill_items.unit` is per line (migration 005) and `products` has no unit
+  column. A fixed four — Meter, Box, Pieces, Feet — in `lib/units.ts`, for the
+  reason categories are fixed: free text lets "pcs", "Pcs" and "pieces" become
+  three units on one shop's bills, and a GST invoice is the wrong place to find
+  that out.
+- **The unit column is nullable, has no default, and nothing is backfilled.**
+  NULL means no unit was chosen, which is the truth for every bill raised before
+  the column existed and for any line the owner leaves alone. A default of
+  'Pieces' would reprint years-old invoices with a claim nobody made at the time
+  — a negative control covers exactly this, and shows an old line turning from
+  "9" into "9 Pcs". `formatQuantity` prints the bare number whenever the value
+  is not one of the four, so a hand-edited database or a backup from a future
+  build cannot put an unknown word on an invoice either.
+- **The long form is stored; the short form is printed.** `Meter` in the
+  database and in the selector where there is room to be unambiguous, `Mtr` in
+  the invoice's narrow quantity column. One mapping, in `lib/units.ts`, so the
+  PDF and the on-screen bill cannot drift apart.
+- **Adding the column bumps the schema to 5, which the backup format handles
+  without any change to itself.** `FORMAT_VERSION` is the container — magic
+  line, manifest, payload — and it is untouched; the manifest's `schemaVersion`
+  is what moves. An older backup still restores, because a restore migrates the
+  incoming database forward before copying it in. The one real consequence is
+  the intended one: a backup written by this build is refused by an older
+  install, with the message that already existed for that case. None of the WAL
+  header handling is affected — that works on bytes 18 and 19 of the file, which
+  have nothing to do with the schema.
 - **`lib/billDraft.ts` is the only thing that turns a cart into a bill.** It is
   a pure function, so what gets written is checkable without a screen or a
   database, and both the totals shown and the totals stored come from the same

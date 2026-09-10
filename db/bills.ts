@@ -20,6 +20,8 @@ export type NewBillItem = {
   product_name_snapshot: string;
   hsn_code_snapshot?: string | null;
   qty: number;
+  /** One of `lib/units.ts`. NULL/omitted means no unit was chosen for this line. */
+  unit?: string | null;
   unit_price_snapshot: number;
   gst_rate_snapshot: number;
   taxable_value: number;
@@ -133,15 +135,16 @@ export async function createBill(
     for (const item of input.items) {
       await txn.runAsync(
         `INSERT INTO bill_items
-           (bill_id, product_id, product_name_snapshot, hsn_code_snapshot, qty,
+           (bill_id, product_id, product_name_snapshot, hsn_code_snapshot, qty, unit,
             unit_price_snapshot, gst_rate_snapshot, taxable_value,
             cgst_amount, sgst_amount, igst_amount, line_total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         billId,
         item.product_id,
         item.product_name_snapshot,
         item.hsn_code_snapshot ?? null,
         item.qty,
+        item.unit ?? null,
         item.unit_price_snapshot,
         item.gst_rate_snapshot,
         item.taxable_value,

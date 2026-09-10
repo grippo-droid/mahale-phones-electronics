@@ -105,6 +105,11 @@ export type BillItemRow = {
   product_name_snapshot: string;
   hsn_code_snapshot: string | null;
   qty: number;
+  /**
+   * How the quantity is measured — see `lib/units.ts`. NULL on every bill
+   * raised before migration 005, and on any line where none was chosen.
+   */
+  unit: string | null;
   unit_price_snapshot: number;
   gst_rate_snapshot: number;
   taxable_value: number;
@@ -238,6 +243,20 @@ const migration004: Migration = {
   },
 };
 
+const migration005: Migration = {
+  version: 5,
+  name: 'bill_item_unit',
+  up: async (db) => {
+    // Nullable with no default, and no backfill. Every bill raised before this
+    // column existed was raised without a unit being chosen, and that is what
+    // NULL says. A default of 'Pieces' would print a claim on those invoices
+    // that nobody made when the sale happened.
+    await db.execAsync(`
+      ALTER TABLE bill_items ADD COLUMN unit TEXT;
+    `);
+  },
+};
+
 /**
  * Every migration ever shipped, in order. Append only.
  */
@@ -246,6 +265,7 @@ export const MIGRATIONS: Migration[] = [
   migration002,
   migration003,
   migration004,
+  migration005,
 ];
 
 /** The schema version the current build of the app expects. */

@@ -36,6 +36,7 @@ import { buildNewBill, findDeletedProducts, findOversells } from '@/lib/billDraf
 import { resolveSupplyType, validateCustomer, type CustomerField } from '@/lib/customer';
 import { formatRupees } from '@/lib/format';
 import { calculateBill, type SupplyType } from '@/lib/gst';
+import type { BillUnit } from '@/lib/units';
 import { invoiceNumberGenerator } from '@/lib/invoiceNumber';
 import { selectBusinessState, useSettingsStore } from '@/store/settings';
 import {
@@ -112,6 +113,7 @@ export default function BillingScreen() {
   const addProduct = useCartStore((state) => state.addProduct);
   const setQty = useCartStore((state) => state.setQty);
   const changeQty = useCartStore((state) => state.changeQty);
+  const setUnit = useCartStore((state) => state.setUnit);
   const removeLine = useCartStore((state) => state.removeLine);
   const setCustomerField = useCartStore((state) => state.setCustomerField);
   const clear = useCartStore((state) => state.clear);
@@ -557,6 +559,7 @@ export default function BillingScreen() {
           onAdd={handleAdd}
           onChangeQty={setQty}
           onStep={changeQty}
+          onChangeUnit={setUnit}
           onRemove={removeLine}
         />
       )}
@@ -760,6 +763,7 @@ type CartProps = {
   onAdd: (product: Product) => void;
   onChangeQty: (productId: number, qty: number) => void;
   onStep: (productId: number, delta: number) => void;
+  onChangeUnit: (productId: number, unit: BillUnit | null) => void;
   onRemove: (productId: number) => void;
 };
 
@@ -780,6 +784,7 @@ function Cart({
   onAdd,
   onChangeQty,
   onStep,
+  onChangeUnit,
   onRemove,
 }: CartProps) {
   const picks = (separated: boolean) =>
@@ -831,6 +836,7 @@ function Cart({
           supplyType={supplyType}
           onChangeQty={onChangeQty}
           onStep={onStep}
+          onChangeUnit={onChangeUnit}
           onRemove={onRemove}
         />
       )}

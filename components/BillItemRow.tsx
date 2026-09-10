@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { formatRupees } from '@/lib/format';
 import { calculateLine, type SupplyType } from '@/lib/gst';
+import { BILL_UNITS, type BillUnit } from '@/lib/units';
 import type { CartLine } from '@/store/cart';
 
 /**
@@ -33,10 +34,20 @@ type Props = {
   supplyType: SupplyType;
   onChangeQty: (productId: number, qty: number) => void;
   onStep: (productId: number, delta: number) => void;
+  /** Null clears the unit — tapping the chosen one again unsets it. */
+  onChangeUnit: (productId: number, unit: BillUnit | null) => void;
   onRemove: (productId: number) => void;
 };
 
-function BillItemRow({ line, stockQty, supplyType, onChangeQty, onStep, onRemove }: Props) {
+function BillItemRow({
+  line,
+  stockQty,
+  supplyType,
+  onChangeQty,
+  onStep,
+  onChangeUnit,
+  onRemove,
+}: Props) {
   // Held as text while editing so the field can be briefly empty mid-typing;
   // only valid whole numbers reach the store.
   const [qtyText, setQtyText] = useState(String(line.qty));
@@ -126,6 +137,34 @@ function BillItemRow({ line, stockQty, supplyType, onChangeQty, onStep, onRemove
         <Text style={styles.lineTotal}>{formatRupees(totals.lineTotal)}</Text>
       </View>
 
+      {/* Sits under the stepper rather than beside it: four chips and a stepper
+          on one row will not fit a narrow phone without shrinking the tap
+          targets, and the quantity controls are what get used on every line. */}
+      <View style={styles.units}>
+        {BILL_UNITS.map((unit) => {
+          const selected = line.unit === unit;
+          return (
+            <Pressable
+              key={unit}
+              // Tapping the chosen unit again clears it, so a mis-tap does not
+              // leave a unit on the invoice with no way to take it off.
+              onPress={() => onChangeUnit(line.productId, selected ? null : unit)}
+              style={({ pressed }) => [
+                styles.unitChip,
+                selected && styles.unitChipSelected,
+                pressed && styles.unitChipPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              accessibilityLabel={
+                selected ? `${unit}, selected. Tap to clear.` : `Measure ${line.name} in ${unit}`
+              }>
+              <Text style={[styles.unitText, selected && styles.unitTextSelected]}>{unit}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       {missing ? (
         <View style={styles.warning}>
           <Ionicons name="alert-circle" size={14} color={Colors.outOfStock} />
@@ -200,6 +239,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
   },
   lineTotal: { fontSize: FontSizes.title, fontWeight: '700', color: Colors.text },
+  units: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.xs },
+  unitChip: {
+    minHeight: Spacing.minTapTarget - Spacing.sm,
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.md,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  unitChipSelected: { backgroundColor: Colors.brand, borderColor: Colors.brand },
+  unitChipPressed: { backgroundColor: Colors.surface },
+  unitText: { fontSize: FontSizes.small, fontWeight: '600', color: Colors.textMuted },
+  unitTextSelected: { color: Colors.background },
   warning: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs },
   warningText: { flex: 1, fontSize: FontSizes.small, color: Colors.lowStock },
   warningTextStrong: { flex: 1, fontSize: FontSizes.small, color: Colors.outOfStock, fontWeight: '600' },
