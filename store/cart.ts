@@ -136,12 +136,22 @@ export const useCartStore = create<CartState>((set) => ({
       ),
     })),
 
-  // Picking a type re-applies its usual status, including when the type is
-  // changed after the status was set by hand. That overwrite is deliberate and
-  // nearly always harmless: the two defaults are the two states, so a deliberate
-  // override survives whenever it agrees with the new type's default, and
-  // changing the type is itself a statement about how the sale is being settled.
-  setPaymentType: (paymentType) => set({ paymentType, paid: defaultPaidFor(paymentType) }),
+  // Changing the type re-applies that type's usual status, overwriting one set
+  // by hand. That is deliberate: changing the type is itself a statement about
+  // how the sale is being settled, and the overwrite is nearly always harmless
+  // because the two defaults are the two states, so an override survives
+  // whenever it agrees with the new type's default.
+  //
+  // Re-tapping the type already chosen is NOT a change and does nothing. The
+  // selected chip looks like it might be a confirm button, and without this
+  // guard an idle tap on it would quietly undo a status the owner had just set
+  // by hand — the one case where the overwrite destroys a real decision.
+  setPaymentType: (paymentType) =>
+    set((state) =>
+      state.paymentType === paymentType
+        ? state
+        : { paymentType, paid: defaultPaidFor(paymentType) }
+    ),
 
   setPaid: (paid) => set({ paid }),
 
