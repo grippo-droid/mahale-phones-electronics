@@ -106,6 +106,8 @@ Android print sheet, which drives any printer Android can already see.
 - [x] **T6.2** — Build "Backup Data" action in Settings, using share sheet (Drive, email, etc.). *(Includes the reminder added at the owner's request: a "Backed up N days ago" line in Settings and a Dashboard nudge once a backup is more than 14 days old.)*
 - [x] **T6.3** — Build "Restore Data" flow: file picker, validation, DB replacement (with confirmation warning). *(Opens the backup bytes as a database and copies them over the live connection with SQLite’s own backup API — no file is replaced and no path is built, both of which failed on the phone. The result is checked against the backup manifest. Every restore saves the current data first, and “Undo last restore” puts that copy back.)*
 
+- [x] **T6.4** — Add "Reset shop data" to Settings: clears products, bills, bill lines and the invoice counters in one transaction, behind a typed confirmation with a "back up first" button. Keeps the shop's own details. *(Added after Phase 7 began, so the app can be tested freely and then put back to a genuine first-run state before the first real invoice. Clearing the counters is the part that matters — without it the numbering carries on from wherever testing got to. `android:allowBackup` set to false in the same change, so a reinstall cannot silently restore the old database from Google's backup.)*
+
 ## Phase 7 — Polish & Non-Functional
 
 - [ ] **T7.1** — Add empty states (e.g., "No products yet — tap + to add your first item").

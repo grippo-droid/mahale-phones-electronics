@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -29,6 +30,7 @@ import {
   restoreBackup,
   RestoreFailedError,
 } from '@/db/backup';
+import { resetShopData, type ResetSummary } from '@/db/reset';
 import { getLastBackupAt, type BusinessSettingField } from '@/db/settings';
 import { describeBackupStatus } from '@/lib/backupStatus';
 import { formatDate } from '@/lib/format';
@@ -158,6 +160,16 @@ export default function SettingsScreen() {
   const [backupError, setBackupError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
 
+  // The reset is deliberately behind a typed word rather than a tap. It is the
+  // only action here that destroys data with nothing kept back — a restore at
+  // least writes the safety copy first — and it is reached from the same screen
+  // as the backup button.
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetText, setResetText] = useState('');
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetDone, setResetDone] = useState<ResetSummary | null>(null);
+
   // The undo is offered only when there is something to undo, so this is the
   // presence of the safety copy rather than a flag we set ourselves — a flag
   // would be a second record of the same fact, free to disagree with the file.
@@ -259,6 +271,41 @@ export default function SettingsScreen() {
           'The backup was made, but it could not be shared. Tap Back up now to try sending it again.'
         )
       );
+    }
+  }, []);
+
+  const openReset = useCallback(() => {
+    setResetText('');
+    setResetError(null);
+    setResetDone(null);
+    setResetOpen(true);
+  }, []);
+
+  /**
+   * Clears the shop's own data, keeping its details and the schema.
+   *
+   * The cart is emptied afterwards because it holds product ids that now point
+   * at nothing — a half-built bill surviving a reset would fail at "Generate
+   * Bill" with a deleted-product warning for every line, which reads as the app
+   * being broken rather than as the reset having worked.
+   *
+   * The business details are NOT reloaded, because the reset does not touch
+   * them. That is the point of keeping them: a GSTIN retyped by hand is its own
+   * source of error.
+   */
+  const confirmReset = useCallback(async () => {
+    setResetError(null);
+    setResetting(true);
+    try {
+      const summary = await resetShopData();
+      useCartStore.getState().clear();
+      setResetDone(summary);
+    } catch (err) {
+      setResetError(
+        ownerMessage(err, 'The data could not be cleared, so nothing was changed. Please try again.')
+      );
+    } finally {
+      setResetting(false);
     }
   }, []);
 
@@ -832,6 +879,27 @@ export default function SettingsScreen() {
           {backupError ? <Note tone="warning" text={backupError} /> : null}
         </Section>
 
+        <Section
+          title="Start fresh"
+          subtitle="Clears everything the shop has entered, and keeps the shop's own details.">
+          <Pressable
+            style={({ pressed }) => [styles.resetButton, pressed && styles.logoButtonPressed]}
+            onPress={openReset}
+            disabled={restoring || backingUp}
+            accessibilityRole="button"
+            accessibilityLabel="Clear all products and bills from this phone">
+            <Ionicons name="trash-outline" size={20} color={Colors.outOfStock} />
+            <Text style={styles.resetButtonText}>Reset shop data</Text>
+          </Pressable>
+
+          {/* Says what it is for, because otherwise the only reason to tap it
+              is curiosity, and that is not a good reason to tap this one. */}
+          <Note
+            tone="info"
+            text="For after testing: clears every product and bill so the first real invoice starts at the beginning of your numbering. Your shop details, GSTIN and invoice format are kept."
+          />
+        </Section>
+
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <Pressable
@@ -854,6 +922,111 @@ export default function SettingsScreen() {
           </Text>
         </Pressable>
       </ScrollView>
+
+      {/* A Modal rather than Alert.prompt, which is iOS-only — on Android it
+          simply does nothing, which would have shipped as a reset button that
+          silently never asks. */}
+      <Modal
+        visible={resetOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => (resetting ? undefined : setResetOpen(false))}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            {resetDone ? (
+              <>
+                <Text style={styles.modalTitle}>Done</Text>
+                <Text style={styles.modalBody}>
+                  Cleared {resetDone.products} {resetDone.products === 1 ? 'product' : 'products'}
+                  {' and '}
+                  {resetDone.bills} {resetDone.bills === 1 ? 'bill' : 'bills'}
+                  {resetDone.invoiceCounters > 0
+                    ? '. Invoice numbering starts from the beginning again.'
+                    : '.'}
+                </Text>
+                <Pressable
+                  style={({ pressed }) => [styles.modalPrimary, pressed && styles.saveButtonPressed]}
+                  onPress={() => setResetOpen(false)}
+                  accessibilityRole="button">
+                  <Text style={styles.modalPrimaryText}>Close</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalTitle}>Reset shop data?</Text>
+                <Text style={styles.modalBody}>
+                  This removes every product and every bill on this phone, and cannot be undone.
+                  Your shop details, GSTIN and invoice format are kept.
+                </Text>
+
+                {/* Offered here, not just recommended in a note. The moment
+                    someone is about to do this is the moment a backup is worth
+                    most, and sending them to another section to find it is how
+                    it does not happen. */}
+                <Pressable
+                  style={({ pressed }) => [styles.modalSecondary, pressed && styles.logoButtonPressed]}
+                  onPress={backUpNow}
+                  disabled={backingUp || resetting}
+                  accessibilityRole="button"
+                  accessibilityLabel="Make a backup before clearing">
+                  {backingUp ? (
+                    <ActivityIndicator color={Colors.brand} />
+                  ) : (
+                    <Ionicons name="cloud-upload-outline" size={18} color={Colors.brand} />
+                  )}
+                  <Text style={styles.modalSecondaryText}>
+                    {backingUp ? 'Making the backup…' : 'Back up first'}
+                  </Text>
+                </Pressable>
+
+                <Text style={styles.modalLabel}>Type RESET to confirm</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={resetText}
+                  onChangeText={setResetText}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  editable={!resetting}
+                  placeholder="RESET"
+                  placeholderTextColor={Colors.textMuted}
+                  accessibilityLabel="Type RESET to confirm clearing the data"
+                />
+
+                {resetError ? <Note tone="warning" text={resetError} /> : null}
+
+                <View style={styles.modalActions}>
+                  <Pressable
+                    style={({ pressed }) => [styles.modalCancel, pressed && styles.logoButtonPressed]}
+                    onPress={() => setResetOpen(false)}
+                    disabled={resetting}
+                    accessibilityRole="button">
+                    <Text style={styles.modalCancelText}>Cancel</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.modalDanger,
+                      // Trimmed, but not case-folded: typing the word in capitals
+                      // is the deliberate act being asked for.
+                      resetText.trim() !== 'RESET' && styles.modalDangerDisabled,
+                      pressed && styles.saveButtonPressed,
+                    ]}
+                    onPress={confirmReset}
+                    disabled={resetText.trim() !== 'RESET' || resetting}
+                    accessibilityRole="button"
+                    accessibilityLabel="Clear all products and bills now">
+                    {resetting ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.modalDangerText}>Clear everything</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -952,6 +1125,83 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
     backgroundColor: Colors.surface,
   },
+  resetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    minHeight: Spacing.minTapTarget,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.outOfStock,
+    paddingHorizontal: Spacing.md,
+  },
+  resetButtonText: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.outOfStock },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'center',
+    padding: Spacing.lg,
+  },
+  modalCard: {
+    backgroundColor: Colors.background,
+    borderRadius: 14,
+    padding: Spacing.lg,
+    gap: Spacing.md,
+  },
+  modalTitle: { fontSize: FontSizes.title, fontWeight: '700', color: Colors.text },
+  modalBody: { fontSize: FontSizes.body, color: Colors.text, lineHeight: 21 },
+  modalLabel: { fontSize: FontSizes.small, fontWeight: '600', color: Colors.textMuted },
+  modalInput: {
+    minHeight: Spacing.minTapTarget,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 10,
+    paddingHorizontal: Spacing.md,
+    fontSize: FontSizes.body,
+    fontWeight: '700',
+    color: Colors.text,
+  },
+  modalActions: { flexDirection: 'row', gap: Spacing.sm },
+  modalCancel: {
+    flex: 1,
+    minHeight: Spacing.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modalCancelText: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.text },
+  modalDanger: {
+    flex: 1,
+    minHeight: Spacing.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    backgroundColor: Colors.outOfStock,
+  },
+  modalDangerDisabled: { opacity: 0.4 },
+  modalDangerText: { fontSize: FontSizes.body, fontWeight: '700', color: '#FFFFFF' },
+  modalPrimary: {
+    minHeight: Spacing.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    backgroundColor: Colors.brand,
+  },
+  modalPrimaryText: { fontSize: FontSizes.body, fontWeight: '700', color: '#FFFFFF' },
+  modalSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    minHeight: Spacing.minTapTarget,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.brand,
+  },
+  modalSecondaryText: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.brand },
   sectionTitle: { fontSize: FontSizes.title, fontWeight: '700', color: Colors.text },
   sectionSubtitle: { fontSize: FontSizes.small, color: Colors.textMuted, marginBottom: Spacing.xs },
 

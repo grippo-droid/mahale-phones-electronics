@@ -21,7 +21,9 @@ import { countProducts, createProduct, type NewProduct, type Product } from './p
  * confirm every real product's HSN code and GST slab with your accountant before
  * the shop bills a customer with them.
  *
- * Clear this data (`clearAllData`) before handing the app over for real use.
+ * Clear this data (`resetShopData` in `db/reset.ts`) before handing the app
+ * over for real use — that one clears the invoice counters too, which this
+ * seed data will have advanced.
  */
 
 /** Sample-only. The real business state comes from Settings in T4.1. */
@@ -157,19 +159,6 @@ export async function seedDatabase(
   );
 
   return { productsCreated: created.length, billsCreated: 2 };
-}
-
-/** Wipes all data but keeps the schema. Used to reset between test runs. */
-export async function clearAllData(db: SQLiteDatabase = getDatabase()): Promise<void> {
-  await db.withExclusiveTransactionAsync(async (txn) => {
-    // bill_items goes first even though the cascade would handle it — being
-    // explicit means this still works if the cascade is ever changed.
-    await txn.execAsync(`
-      DELETE FROM bill_items;
-      DELETE FROM bills;
-      DELETE FROM products;
-    `);
-  });
 }
 
 // ---------------------------------------------------------------------------

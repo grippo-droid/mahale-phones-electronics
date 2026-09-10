@@ -769,6 +769,40 @@ confirmation of the shop's existing signage/branding.
   rebuilding it out of `defaultDatabaseDirectory` and the database name.** The
   rebuilt path would be a second definition of where the file is, free to drift
   from wherever expo-sqlite actually put it.
+- **"Reset shop data" clears the invoice counters as well as the rows, and
+  that is the whole point of it.** `reserveInvoiceNumber` reads
+  `invoice_seq:<period>` from `app_settings` BEFORE it falls back to the
+  configured starting number, so deleting only products, bills and bill_items
+  leaves the series continuing from wherever testing got to. The next "first"
+  bill would be `MPE/2026-27/0154`, not `0151` — verified by a negative control
+  that removes the counter delete and watches exactly that happen. Clearing
+  bills without clearing counters is not a partial reset; it is a broken one.
+  One transaction, so a failure part-way leaves the shop as it was.
+- **The reset keeps the shop's details on purpose.** Name, GSTIN, address, the
+  invoice format and the low-stock default are configuration, not data. Losing
+  them means retyping a GSTIN by hand, which is its own source of error.
+  Everything it removes is a row the owner created and can recreate. The
+  `LIKE 'invoice\_seq:%' ESCAPE '\'` is escaped for the same reason the search
+  in `db/bills.ts` is: an unescaped `_` is a single-character wildcard, and
+  would match a future key like `invoiceXseq:`.
+- **The confirmation is a Modal with a typed word, not `Alert.prompt`.**
+  `Alert.prompt` is iOS-only and does nothing at all on Android — it would have
+  shipped as a reset button that silently never asks. The modal also offers
+  "Back up first" inline, because the moment someone is about to erase the shop
+  is when a backup is worth most, and sending them to another section to find
+  it is how it does not happen. The cart is cleared afterwards: it holds product
+  ids that now point at nothing, and a half-built bill surviving a reset fails
+  at "Generate Bill" with a deleted-product warning on every line, which reads
+  as the app being broken rather than as the reset having worked.
+- **`android:allowBackup` is `false`.** Expo defaults it to true, which lets
+  Android copy the app's internal storage — the SQLite database included — to
+  the owner's Google account and restore it automatically on reinstall. That
+  makes a reinstall an unreliable way to start clean: it can look like a fresh
+  install and quietly bring back the old bills and the old invoice counter. The
+  app already has an explicit backup and restore the owner controls, so silent
+  duplication mostly adds a way for stale data to reappear unannounced, and
+  Security & Access already treats a backup as being as sensitive as the phone.
+  Verify with `npx expo config --type introspect`, not by reading `app.json`.
 - **Internal error messages never reach the screen.** `getDatabase()` throws
   "Database not initialised yet — await initDatabase() first", which is a note
   to a developer; on a counter it just looks like the app has broken. Settings
