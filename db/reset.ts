@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { getDatabase } from './init';
+import { LIKE_ESCAPE_SQL } from '@/lib/likeSearch';
 
 /**
  * Clearing the shop's data without reinstalling the app.
@@ -78,7 +79,7 @@ export async function resetShopData(
          (SELECT COUNT(*) FROM app_settings WHERE key = 'quotation_seq')
            AS quotation_counter,
          (SELECT COUNT(*) FROM app_settings
-           WHERE key LIKE 'invoice\\_seq:%' ESCAPE '\\') AS counters`
+           WHERE key LIKE 'invoice\\_seq:%' ${LIKE_ESCAPE_SQL}) AS counters`
     );
 
     summary.products = counts?.products ?? 0;
@@ -101,7 +102,9 @@ export async function resetShopData(
 
     // The escape matters: an unescaped _ is a single-character wildcard, so
     // 'invoice_seq:%' would also match a future key like 'invoiceXseq:...'.
-    await txn.runAsync(`DELETE FROM app_settings WHERE key LIKE 'invoice\\_seq:%' ESCAPE '\\'`);
+    await txn.runAsync(
+      `DELETE FROM app_settings WHERE key LIKE 'invoice\\_seq:%' ${LIKE_ESCAPE_SQL}`
+    );
 
     // The quotation counter goes too, for the same reason the invoice ones do.
     // Left behind, a reset would carry on from Q-0007 having just deleted every

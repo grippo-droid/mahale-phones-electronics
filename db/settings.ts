@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { BUSINESS_DETAILS, type BusinessDetails } from '@/constants/business';
 import { getDatabase } from './init';
+import { LIKE_ESCAPE_SQL } from '@/lib/likeSearch';
 
 /**
  * Key/value accessor over the `app_settings` table.
@@ -172,7 +173,7 @@ export async function listInvoiceCounters(
   db: SQLiteDatabase = getDatabase()
 ): Promise<{ periodKey: string; lastUsed: number }[]> {
   const rows = await db.getAllAsync<{ key: string; value: string | null }>(
-    "SELECT key, value FROM app_settings WHERE key LIKE 'invoice\\_seq:%' ESCAPE '\\' ORDER BY key"
+    `SELECT key, value FROM app_settings WHERE key LIKE 'invoice\\_seq:%' ${LIKE_ESCAPE_SQL} ORDER BY key`
   );
   return rows.map((row) => ({
     periodKey: row.key.slice('invoice_seq:'.length),
@@ -199,7 +200,7 @@ export async function getBusinessDetails(
   db: SQLiteDatabase = getDatabase()
 ): Promise<BusinessDetails> {
   const rows = await db.getAllAsync<{ key: string; value: string | null }>(
-    "SELECT key, value FROM app_settings WHERE key LIKE 'business\\_%' ESCAPE '\\'"
+    `SELECT key, value FROM app_settings WHERE key LIKE 'business\\_%' ${LIKE_ESCAPE_SQL}`
   );
   const stored = new Map(rows.map((row) => [row.key, row.value]));
 

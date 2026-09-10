@@ -612,8 +612,33 @@ confirmation of the shop's existing signage/branding.
   invoice. It is read from the cart line's HSN **snapshot**, not re-queried from
   the product, because the snapshot is what `bill_items` stores and therefore
   what actually reaches the invoice. It warns; it never blocks.
-- **The `ESCAPE` clause needs a doubled backslash, and the character has one
-  definition.** `ESCAPE ''` written with a single backslash inside a template
+- **Nobody writes a SQL `ESCAPE` clause by hand any more — `lib/likeSearch.ts`
+  builds it.** `likeClause(expressions)` returns the parenthesised OR of LIKE
+  tests, `likeTerm(search)` returns the escaped, `%`-wrapped parameter, and
+  `LIKE_ESCAPE_SQL` is the bare clause for the `app_settings` key-prefix queries
+  where the pattern is a constant rather than a user's term. `db/bills.ts`,
+  `db/products.ts`, `db/quotations.ts`, `db/settings.ts` and `db/reset.ts` all
+  go through it, so the escape character occurs exactly once in the codebase.
+  An ESLint `no-restricted-syntax` rule refuses `ESCAPE '` in any other file —
+  verified by mutating each repository in turn and watching it fire.
+  
+  This is a structural fix for a bug shipped twice. The correct code LOOKS
+  wrong: the escape character is one backslash, written `'\\'` in TypeScript,
+  so the correct clause reads as under-escaped and the instinctive "fix" doubles
+  it — which emits two characters and makes SQLite reject the whole statement.
+  It then fails only when a search term is present, so every other query against
+  the table works and it ships green. `db/bills.ts` carried it from T1.4 until
+  History first passed a search term; `db/quotations.ts` reintroduced it in T5.7.
+- **`npm run lint` is `eslint .`, not `expo lint`.** `expo lint` never covered
+  `db/` or `lib/` — the two directories holding every piece of data logic — which
+  is why the lint baseline had only ever reported screens and components, and
+  why a rule aimed at the repositories would have been decorative. The hooks
+  rules are turned off for those two directories: they contain no React, and
+  `useRollbackJournal` in `db/backup.ts` is a pure function whose name begins
+  with "use" in the English sense, which the rule reads as a misplaced hook.
+- **The old note, kept because the reasoning still applies:** the `ESCAPE`
+  clause needs a doubled backslash in source, and the character has one
+  definition. `ESCAPE ''` written with a single backslash inside a template
   literal compiles to `ESCAPE ''`, and SQLite rejects the entire query —
   *"ESCAPE expression must be a single character"*. `db/bills.ts` shipped that
   way from T1.4 and nothing noticed, because nothing passed `listBills` a search

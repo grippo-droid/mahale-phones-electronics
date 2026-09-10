@@ -1,8 +1,9 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
-import { createBill, type NewBill, type NewBillItem } from './bills';
+import { createBill, type NewBill } from './bills';
 import { getDatabase } from './init';
 import type { QuotationItemRow, QuotationRow } from './schema';
+import { likeClause, likeTerm } from '@/lib/likeSearch';
 import { reserveQuotationNumber } from '@/lib/quotationNumber';
 
 /**
@@ -59,24 +60,6 @@ export type QuotationListOptions = {
   offset?: number;
 };
 
-/**
- * The LIKE escape character, exactly as in `db/bills.ts`.
- *
- * The TypeScript literal is two characters and the runtime value is ONE
- * backslash, which is what the SQL needs. Interpolating it twice renders two
- * characters and SQLite rejects the entire query — "ESCAPE expression must be a
- * single character". This project already shipped that bug once in
- * `db/bills.ts`, where nothing noticed until a search box was finally wired up;
- * it was reintroduced here and caught by the test that searches by reference.
- *
- * One constant, used by both the SQL and `escapeLike`, so the two cannot
- * disagree about which character is doing the escaping.
- */
-const LIKE_ESCAPE = '\\';
-
-function escapeLike(term: string): string {
-  return term.replace(/[\\%_]/g, (match) => `${LIKE_ESCAPE}${match}`);
-}
 
 // ---------------------------------------------------------------------------
 // Create
@@ -181,13 +164,10 @@ export async function listQuotations(
   const params: (string | number)[] = [];
 
   if (options.search?.trim()) {
-    const term = `%${escapeLike(options.search.trim())}%`;
-    where.push(
-      `(customer_name LIKE ? ESCAPE '${LIKE_ESCAPE}'` +
-        ` OR customer_phone LIKE ? ESCAPE '${LIKE_ESCAPE}'` +
-        ` OR reference_number LIKE ? ESCAPE '${LIKE_ESCAPE}')`
-    );
-    params.push(term, term, term);
+    const columns = ['customer_name', 'customer_phone', 'reference_number'];
+    const term = likeTerm(options.search);
+    where.push(likeClause(columns));
+    params.push(...columns.map(() => term));
   }
 
   if (options.openOnly) where.push('converted_bill_id IS NULL');

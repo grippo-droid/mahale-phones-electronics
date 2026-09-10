@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { getDatabase } from './init';
 import { getGlobalLowStockThreshold } from './settings';
+import { likeClause, likeTerm } from '@/lib/likeSearch';
 import type { ProductRow } from './schema';
 
 /**
@@ -97,14 +98,18 @@ export async function listProducts(
   const params: (string | number)[] = [];
 
   if (options.search?.trim()) {
-    // Escape LIKE wildcards so a literal % or _ in a search box behaves.
-    const term = `%${escapeLike(options.search.trim())}%`;
-    where.push(
-      `(name LIKE ? ESCAPE '\\' OR IFNULL(brand, '') LIKE ? ESCAPE '\\'` +
-        ` OR IFNULL(model_number, '') LIKE ? ESCAPE '\\'` +
-        ` OR IFNULL(hsn_code, '') LIKE ? ESCAPE '\\')`
-    );
-    params.push(term, term, term, term);
+    // IFNULL on the optional columns: a NULL never matches a LIKE, so a product
+    // with no brand recorded would otherwise be unfindable even by its name.
+    const columns = [
+      'name',
+      "IFNULL(brand, '')",
+      "IFNULL(model_number, '')",
+      "IFNULL(hsn_code, '')",
+    ];
+    const term = likeTerm(options.search);
+    where.push(likeClause(columns));
+    // One bound copy per expression, in the same order.
+    params.push(...columns.map(() => term));
   }
 
   if (options.category && options.category !== 'All') {
@@ -525,9 +530,4 @@ function validateProductInput(
       throw new Error('Low stock threshold must be a whole number, zero or more.');
     }
   }
-}
-
-/** Escapes LIKE metacharacters so a literal % or _ typed into search matches itself. */
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (match) => `\\${match}`);
 }

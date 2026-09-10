@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { getDatabase } from './init';
+import { likeClause, likeTerm } from '@/lib/likeSearch';
 import type { BillItemRow, BillRow } from './schema';
 
 /**
@@ -243,13 +244,11 @@ function buildBillFilter(options: BillListOptions): {
   const params: (string | number)[] = [];
 
   if (options.search?.trim()) {
-    const term = `%${escapeLike(options.search.trim())}%`;
-    where.push(
-      `(customer_name LIKE ? ESCAPE '${LIKE_ESCAPE}'` +
-        ` OR customer_phone LIKE ? ESCAPE '${LIKE_ESCAPE}'` +
-        ` OR invoice_number LIKE ? ESCAPE '${LIKE_ESCAPE}')`
-    );
-    params.push(term, term, term);
+    const columns = ['customer_name', 'customer_phone', 'invoice_number'];
+    const term = likeTerm(options.search);
+    where.push(likeClause(columns));
+    // One bound copy per expression, in the same order.
+    params.push(...columns.map(() => term));
   }
 
   if (options.from) {
@@ -437,23 +436,3 @@ function endOfLocalDay(date: Date): Date {
   return copy;
 }
 
-/**
- * The LIKE escape character.
- *
- * Named rather than spelled inline, because it has to appear in two places
- * that must agree — the SQL `ESCAPE` clause and the escaping below — and
- * because a backslash inside a template literal needs doubling. Written with
- * one, `ESCAPE '\'` compiles to `ESCAPE ''` and SQLite rejects the whole
- * query: "ESCAPE expression must be a single character". That is what it did
- * from T1.4 until the History screen first passed a search term.
- */
-const LIKE_ESCAPE = '\\';
-
-/**
- * Makes a customer's own text literal inside a LIKE pattern. A shop called
- * "100% Traders" would otherwise match every bill, and a name with an
- * underscore would match any character in its place.
- */
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (match) => `${LIKE_ESCAPE}${match}`);
-}
