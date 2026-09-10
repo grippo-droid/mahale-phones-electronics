@@ -23,6 +23,7 @@ import QuickPickList, { type QuickPickSection } from '@/components/QuickPickList
 import ProductPickRow from '@/components/ProductPickRow';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { createBill } from '@/db/bills';
+import { AlreadyConvertedError, convertQuotationToBill } from '@/db/quotations';
 import {
   FREQUENTLY_SOLD_WINDOW_DAYS,
   getFrequentlySold,
@@ -119,6 +120,7 @@ export default function BillingScreen() {
   const paid = useCartStore((state) => state.paid);
   const setPaymentType = useCartStore((state) => state.setPaymentType);
   const setPaid = useCartStore((state) => state.setPaid);
+  const sourceQuotationId = useCartStore((state) => state.sourceQuotationId);
   const removeLine = useCartStore((state) => state.removeLine);
   const setCustomerField = useCartStore((state) => state.setCustomerField);
   const clear = useCartStore((state) => state.clear);
@@ -399,12 +401,22 @@ export default function BillingScreen() {
         paymentType: paymentType!,
         paid,
       });
-      const bill = await createBill({
+      const payload = {
         ...draft,
         // Reserved inside the write transaction, so a bill that fails to save
         // cannot consume a number — see lib/invoiceNumber.ts.
         generateInvoiceNumber: invoiceNumberGenerator(),
-      });
+      };
+
+      // A bill made from a quotation goes through the same writer, with the
+      // quotation marked converted inside the same transaction. Everything else
+      // about it — the numbering, the date, the stock, the confirmations —
+      // is identical to any other sale, which is the point of routing
+      // conversions through this screen rather than writing a bill elsewhere.
+      const billId =
+        sourceQuotationId !== null
+          ? (await convertQuotationToBill(sourceQuotationId, payload)).billId
+          : (await createBill(payload)).id;
 
       // Only cleared once the bill is safely written. If createBill throws, the
       // cart is still there and the sale can be retried rather than retyped.
@@ -413,8 +425,18 @@ export default function BillingScreen() {
       setStep('items');
       setSearchInput('');
 
-      router.push({ pathname: '/bill/[id]', params: { id: String(bill.id) } });
+      router.push({ pathname: '/bill/[id]', params: { id: String(billId) } });
     } catch (err) {
+      // Its own message: this one is not a failure to save so much as a race
+      // already resolved, and the owner needs to know a bill exists rather than
+      // that something broke.
+      if (err instanceof AlreadyConvertedError) {
+        setError(
+          'That quotation has already been turned into a bill. Open it from the Quotes tab to see which one.'
+        );
+        return;
+      }
+
       setError(
         err instanceof Error
           ? `The bill could not be saved: ${err.message}`
@@ -423,7 +445,7 @@ export default function BillingScreen() {
     } finally {
       setGenerating(false);
     }
-  }, [customer, lines, paymentType, paid, clear]);
+  }, [customer, lines, paymentType, paid, sourceQuotationId, clear]);
 
   const handleGenerate = useCallback(() => {
     // Force every outstanding error into view rather than only the touched ones,

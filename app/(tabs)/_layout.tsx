@@ -47,6 +47,20 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => <Ionicons name="time" size={size} color={color} />,
         }}
       />
+      {/* Its own tab rather than a section of History: the two answer different
+          questions — History is "what did we sell?", this is "what are we still
+          waiting to hear back about?" — and only the second has money still on
+          the table. Labelled "Quotes" because six tab labels have to fit a
+          phone; the screens themselves say "Quotation" in full. */}
+      <Tabs.Screen
+        name="quotations"
+        options={{
+          title: 'Quotes',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="document-text" size={size} color={color} />
+          ),
+        }}
+      />
       <Tabs.Screen
         name="settings"
         options={{

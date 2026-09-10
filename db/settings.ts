@@ -30,6 +30,17 @@ export const SETTING_KEYS = {
    * itself, which is right: a restored phone genuinely was backed up then.
    */
   lastBackupAt: 'last_backup_at',
+  /**
+   * The last quotation reference issued (T5.7).
+   *
+   * A single always-incrementing counter, deliberately unlike the invoice
+   * counters above: those are one row per financial year because the series
+   * restarts each April, and a bill backdated across 1 April has to resume the
+   * closed year. A quotation never appears on a GST return and has no statutory
+   * period, so it has nothing to restart for — and one unbroken series makes a
+   * quotation reference impossible to mistake for an invoice number.
+   */
+  quotationSeq: 'quotation_seq',
 } as const;
 
 /**

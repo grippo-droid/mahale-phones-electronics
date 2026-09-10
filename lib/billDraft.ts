@@ -56,7 +56,13 @@ export function buildNewBill(
   const items: NewBillItem[] = lines.map((line, index) => {
     const computed = result.lines[index];
     return {
-      product_id: line.productId,
+      // Real ids are positive. A line carrying anything else has no inventory
+      // record behind it — a quotation line whose product was deleted, which
+      // `quotationToCartLines` gives a negative stand-in so the cart can still
+      // key by id. `bill_items.product_id` is a foreign key, so that stand-in
+      // must not reach it; NULL is what "no product" already means there, and
+      // it is also what stops `createBill` trying to reduce stock that is gone.
+      product_id: line.productId > 0 ? line.productId : null,
       // The snapshot from the cart, not a fresh read of the product: the
       // customer was quoted this name at this price, and editing the product
       // afterwards must not rewrite history.

@@ -450,6 +450,70 @@ confirmation of the shop's existing signage/branding.
   combine in the query, and one control (`backToBill`) clears both. Leaving the
   user to work out that two separate things need clearing to see the bill again
   would be needless.
+- **A quotation is its own table, not a flag on `bills`** (migration 007). It
+  takes no invoice number and must never advance that counter — ten quotations
+  and no sales has to leave the invoice series untouched. It moves no stock. It
+  carries no CGST/SGST/IGST split. And it can simply expire, where a bill is a
+  permanent record of something that happened. Behind a nullable column on
+  `bills`, every query about sales would have to remember to exclude the rows
+  that were not sales.
+- **Quotation references are `Q-0001`, one unbroken series, and never reset.**
+  The invoice series restarts each 1 April because GST returns are filed by
+  financial year; a quotation appears on no return and has no statutory period,
+  so it has nothing to restart for. One series also means a reference can never
+  be mistaken for an invoice number. Its counter is a single `quotation_seq` row,
+  reserved inside the write transaction exactly as an invoice number is.
+- **A quotation shows ONE GST figure, and is totalled as an inter-state
+  supply.** Which heads apply is decided by the customer's state at the time of
+  sale, which a quotation does not collect — so a split here would be invented.
+  Of the two routes to a single figure, inter-state is the exact one: intra-state
+  rounds half the rate twice and lands a paisa away (see `resolveSupplyType`).
+  The bill made from it recomputes with the real supply type and can therefore
+  differ by up to a rupee — the same one-cart-in-a-hundred effect already
+  documented, and part of why converting opens an editable cart.
+- **Converting loads the quotation into the billing cart; it does not write a
+  bill.** The bill is then generated on the Billing screen like any other —
+  same customer step, same oversell confirmation, same numbering. Two code
+  paths that both write bills would be two to keep in step, and the rarer would
+  be the less tested. It also means the prices can be checked first, which
+  matters most on exactly the quotations carrying the age warning.
+- **The bill is dated the day of conversion, never the quotation's date.** The
+  date decides the GST return period: a quotation made in March and accepted in
+  April is an April sale, and inheriting the old date files it in the wrong
+  quarter. That is a reporting error, not a cosmetic one.
+- **The bill and the "converted" mark commit together, through `afterInsert`.**
+  `createBill` owns its transaction and SQLite will not nest one, so the hook is
+  injected — the same pattern already used for `generateInvoiceNumber`, and for
+  the same reason. Written as two sequential statements, a failure between them
+  would leave a bill nothing points at and a quotation still convertible.
+- **The double-conversion guard is `WHERE ... AND converted_bill_id IS NULL`
+  with a `changes` check, not a test in the caller.** The read-then-write in
+  `convertQuotationToBill` catches the ordinary case; only the WHERE clause
+  survives two taps racing. Note the harness CANNOT drive that race —
+  `node:sqlite` is synchronous on one connection, so conversions serialise and a
+  behavioural assertion passes with the guard removed. That was found by a
+  negative control and the test now asserts the issued SQL carries the clause,
+  which is weaker and honest about being so.
+- **`converted_bill_id` is the only record of whether a quotation converted.**
+  A separate boolean would be a second copy of the same fact, free to disagree
+  with the link.
+- **Quotations are stale at 20 days and the document says the same.**
+  `QUOTATION_STALE_DAYS` badges the list; `QUOTATION_VALID_DAYS` prints on the
+  PDF. They must not disagree about when a price stops being dependable. The
+  badge is amber — the Low stock / Not Paid amber — because an ageing quotation
+  is worth attention, not a fault. Red stays for things that are wrong.
+- **The shop's chrome on printed documents lives in `lib/documentChrome.ts`,**
+  shared by the invoice and the quotation. Branding drifting between a
+  customer's quotation and the invoice that follows it is exactly what nobody
+  notices until a customer asks whether they came from the same shop. What each
+  document does NOT share is its title, columns and totals — and the quotation
+  is titled "Quotation", never "Tax Invoice", so it can never be presented as
+  proof of a sale.
+- **`quotationToCartLines` gives a deleted product a NEGATIVE stand-in id**, so
+  the cart can still key lines by id, and `buildNewBill` maps anything not
+  positive back to NULL. `bill_items.product_id` is a foreign key: the stand-in
+  must never reach it, and NULL is already what "no product behind this line"
+  means there — it is also what stops `createBill` reducing stock that is gone.
 - **Payment is two fields, not one: how the sale was agreed, and where the
   money is.** `bills.payment_type` ('Cash' | 'Credit') and `bills.paid`
   (1/0/NULL), migration 006. A credit bill gets paid a fortnight later without

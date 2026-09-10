@@ -130,6 +130,52 @@ export type BillItemRow = {
   line_total: number;
 };
 
+export type QuotationRow = {
+  id: number;
+  /** Q-0001, Q-0002 … Its own series, unrelated to invoice numbers. */
+  reference_number: string;
+  date: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_address: string | null;
+  subtotal: number;
+  /**
+   * One GST figure, not a CGST/SGST/IGST split. Which heads apply is decided by
+   * the customer's state when the sale happens, and a quotation does not ask
+   * for it — so a split here would be an invented one.
+   */
+  gst_total: number;
+  grand_total: number;
+  pdf_path: string | null;
+  /**
+   * The bill this quotation became, or NULL if it has not been converted. The
+   * only record of that fact: a separate "converted" flag would be a second
+   * copy of it, free to disagree with the link.
+   */
+  converted_bill_id: number | null;
+  converted_at: string | null;
+  created_at: string;
+};
+
+export type QuotationItemRow = {
+  id: number;
+  quotation_id: number;
+  /** NULL if the product was deleted after the quotation was made. */
+  product_id: number | null;
+  product_name_snapshot: string;
+  hsn_code_snapshot: string | null;
+  qty: number;
+  /** One of `lib/units.ts`, or NULL when none was chosen. */
+  unit: string | null;
+  unit_price_snapshot: number;
+  gst_rate_snapshot: number;
+  /** Kept so converting rebuilds the cart line exactly as it was quoted. */
+  price_includes_gst: number;
+  taxable_value: number;
+  gst_amount: number;
+  line_total: number;
+};
+
 export type SchemaVersionRow = {
   version: number;
   name: string;
@@ -284,6 +330,59 @@ const migration006: Migration = {
   },
 };
 
+const migration007: Migration = {
+  version: 7,
+  name: 'quotations',
+  up: async (db) => {
+    // A quotation is an offer, not a legal document, which is why this looks
+    // like `bills` but is not it: no invoice number, no CGST/SGST/IGST split
+    // (the split is decided by the customer's state at the time of sale, which
+    // a quotation does not collect), no GSTIN, and no effect on stock.
+    //
+    // `converted_bill_id` NULL means "not converted", and is the single source
+    // of truth for that — a separate boolean would be a second record of the
+    // same fact, free to disagree with the link.
+    await db.execAsync(`
+      CREATE TABLE quotations (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        reference_number  TEXT    NOT NULL UNIQUE,
+        date              TEXT    NOT NULL,
+        customer_name     TEXT    NOT NULL,
+        customer_phone    TEXT    NOT NULL,
+        customer_address  TEXT,
+        subtotal          REAL    NOT NULL DEFAULT 0,
+        gst_total         REAL    NOT NULL DEFAULT 0,
+        grand_total       REAL    NOT NULL DEFAULT 0,
+        pdf_path          TEXT,
+        converted_bill_id INTEGER REFERENCES bills (id) ON DELETE SET NULL,
+        converted_at      TEXT,
+        created_at        TEXT    NOT NULL
+      );
+
+      CREATE INDEX        idx_quotations_date      ON quotations (date DESC);
+      CREATE UNIQUE INDEX idx_quotations_reference ON quotations (reference_number);
+
+      CREATE TABLE quotation_items (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        quotation_id          INTEGER NOT NULL REFERENCES quotations (id) ON DELETE CASCADE,
+        product_id            INTEGER          REFERENCES products (id)   ON DELETE SET NULL,
+        product_name_snapshot TEXT    NOT NULL,
+        hsn_code_snapshot     TEXT,
+        qty                   INTEGER NOT NULL,
+        unit                  TEXT,
+        unit_price_snapshot   REAL    NOT NULL,
+        gst_rate_snapshot     REAL    NOT NULL DEFAULT 0,
+        price_includes_gst    INTEGER NOT NULL DEFAULT 0,
+        taxable_value         REAL    NOT NULL DEFAULT 0,
+        gst_amount            REAL    NOT NULL DEFAULT 0,
+        line_total            REAL    NOT NULL DEFAULT 0
+      );
+
+      CREATE INDEX idx_quotation_items_quotation_id ON quotation_items (quotation_id);
+    `);
+  },
+};
+
 /**
  * Every migration ever shipped, in order. Append only.
  */
@@ -294,6 +393,7 @@ export const MIGRATIONS: Migration[] = [
   migration004,
   migration005,
   migration006,
+  migration007,
 ];
 
 /** The schema version the current build of the app expects. */

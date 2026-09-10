@@ -20,8 +20,11 @@ export type ResetSummary = {
   products: number;
   bills: number;
   billItems: number;
+  quotations: number;
   /** Invoice counter rows dropped — one per financial year that had bills. */
   invoiceCounters: number;
+  /** Whether the quotation counter was reset, so Q-0001 is next again. */
+  quotationCounterCleared: boolean;
 };
 
 /**
@@ -47,7 +50,14 @@ export type ResetSummary = {
 export async function resetShopData(
   db: SQLiteDatabase = getDatabase()
 ): Promise<ResetSummary> {
-  const summary: ResetSummary = { products: 0, bills: 0, billItems: 0, invoiceCounters: 0 };
+  const summary: ResetSummary = {
+    products: 0,
+    bills: 0,
+    billItems: 0,
+    quotations: 0,
+    invoiceCounters: 0,
+    quotationCounterCleared: false,
+  };
 
   await db.withExclusiveTransactionAsync(async (txn) => {
     // Counted inside the transaction so the figures reported are the rows that
@@ -56,12 +66,17 @@ export async function resetShopData(
       products: number;
       bills: number;
       bill_items: number;
+      quotations: number;
       counters: number;
+      quotation_counter: number;
     }>(
       `SELECT
          (SELECT COUNT(*) FROM products)   AS products,
          (SELECT COUNT(*) FROM bills)      AS bills,
          (SELECT COUNT(*) FROM bill_items) AS bill_items,
+         (SELECT COUNT(*) FROM quotations) AS quotations,
+         (SELECT COUNT(*) FROM app_settings WHERE key = 'quotation_seq')
+           AS quotation_counter,
          (SELECT COUNT(*) FROM app_settings
            WHERE key LIKE 'invoice\\_seq:%' ESCAPE '\\') AS counters`
     );
@@ -69,11 +84,16 @@ export async function resetShopData(
     summary.products = counts?.products ?? 0;
     summary.bills = counts?.bills ?? 0;
     summary.billItems = counts?.bill_items ?? 0;
+    summary.quotations = counts?.quotations ?? 0;
     summary.invoiceCounters = counts?.counters ?? 0;
+    summary.quotationCounterCleared = (counts?.quotation_counter ?? 0) > 0;
 
-    // bill_items first even though the cascade would handle it — being explicit
-    // means this still works if the cascade is ever changed.
+    // Children before parents even though the cascades would handle it — being
+    // explicit means this still works if a cascade is ever changed. Quotations
+    // go before bills, because a converted one references the bill it became.
     await txn.execAsync(`
+      DELETE FROM quotation_items;
+      DELETE FROM quotations;
       DELETE FROM bill_items;
       DELETE FROM bills;
       DELETE FROM products;
@@ -82,6 +102,12 @@ export async function resetShopData(
     // The escape matters: an unescaped _ is a single-character wildcard, so
     // 'invoice_seq:%' would also match a future key like 'invoiceXseq:...'.
     await txn.runAsync(`DELETE FROM app_settings WHERE key LIKE 'invoice\\_seq:%' ESCAPE '\\'`);
+
+    // The quotation counter goes too, for the same reason the invoice ones do.
+    // Left behind, a reset would carry on from Q-0007 having just deleted every
+    // quotation that explains where the first six went. An exact key, so it
+    // needs no LIKE and no escaping.
+    await txn.runAsync(`DELETE FROM app_settings WHERE key = 'quotation_seq'`);
   });
 
   return summary;

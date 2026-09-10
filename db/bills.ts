@@ -66,6 +66,20 @@ export type NewBill = {
   payment_type?: string | null;
   /** true paid, false not paid, NULL/omitted not recorded. */
   paid?: boolean | null;
+  /**
+   * Runs inside the same transaction as the bill, after it and its lines are
+   * written, with the new bill's id.
+   *
+   * Injected for the same reason `generateInvoiceNumber` is: some things have
+   * to commit or roll back with the bill, and SQLite will not nest a
+   * transaction, so a caller cannot wrap `createBill` in one of its own.
+   * Converting a quotation is the case this exists for — marking the quotation
+   * converted has to be part of writing the bill, or a failure between the two
+   * leaves a bill nothing points at and a quotation still convertible.
+   *
+   * Throwing in here rolls the whole bill back.
+   */
+  afterInsert?: (txn: SQLiteDatabase, billId: number) => Promise<void>;
   items: NewBillItem[];
 };
 
@@ -172,6 +186,10 @@ export async function createBill(
         );
       }
     }
+
+    // Last, so it sees a bill that is fully written. Still inside the
+    // transaction, so anything it throws takes the bill with it.
+    if (input.afterInsert) await input.afterInsert(txn, billId);
   });
 
   const created = await getBillById(billId, db);

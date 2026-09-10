@@ -63,12 +63,23 @@ type CartState = {
    * and can be changed afterwards without changing the type.
    */
   paid: boolean;
+  /**
+   * The quotation this bill is being made from, or null for an ordinary sale.
+   *
+   * Held here rather than passed through navigation because the cart already
+   * survives a trip to another tab, and this has to survive exactly the same
+   * trip. It is what makes "Generate Bill" write the bill and mark the
+   * quotation converted in one transaction instead of just writing a bill.
+   */
+  sourceQuotationId: number | null;
   /** Adds the product, or bumps the quantity if it is already on the bill. */
   addProduct: (product: Product) => void;
   setQty: (productId: number, qty: number) => void;
   /** Also resets `paid` to the usual status for that type. */
   setPaymentType: (paymentType: PaymentType) => void;
   setPaid: (paid: boolean) => void;
+  /** Replaces the whole cart with a quotation's contents, ready to be billed. */
+  loadFromQuotation: (lines: CartLine[], customer: Customer, quotationId: number) => void;
   /** Pass null to clear it — tapping the chosen unit again unsets it. */
   setUnit: (productId: number, unit: BillUnit | null) => void;
   changeQty: (productId: number, delta: number) => void;
@@ -96,6 +107,7 @@ export const useCartStore = create<CartState>((set) => ({
   paymentType: null,
   // Meaningless until a payment type is chosen, and never read before then.
   paid: false,
+  sourceQuotationId: null,
 
   addProduct: (product) =>
     set((state) => {
@@ -155,6 +167,12 @@ export const useCartStore = create<CartState>((set) => ({
 
   setPaid: (paid) => set({ paid }),
 
+  // The payment type is deliberately NOT carried over from anywhere: how the
+  // customer settles up is decided when they actually pay, not when they were
+  // quoted, so it is asked for again like any other bill.
+  loadFromQuotation: (lines, customer, quotationId) =>
+    set({ lines, customer, sourceQuotationId: quotationId, paymentType: null, paid: false }),
+
   setUnit: (productId, unit) =>
     set((state) => ({
       lines: state.lines.map((line) =>
@@ -186,7 +204,14 @@ export const useCartStore = create<CartState>((set) => ({
   // Clearing the bill clears the customer as well. The next sale is to a
   // different person, and a name left over from the last one is exactly the
   // sort of thing that reaches an invoice unnoticed.
-  clear: () => set({ lines: [], customer: EMPTY_CUSTOMER, paymentType: null, paid: false }),
+  clear: () =>
+    set({
+      lines: [],
+      customer: EMPTY_CUSTOMER,
+      paymentType: null,
+      paid: false,
+      sourceQuotationId: null,
+    }),
 }));
 
 // ---------------------------------------------------------------------------

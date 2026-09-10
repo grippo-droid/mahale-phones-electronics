@@ -102,6 +102,8 @@ Android print sheet, which drives any printer Android can already see.
 
 - [x] **T5.6** — Add payment tracking to bills: a required Cash/Credit choice when the bill is generated, and a separate Paid/Not Paid status defaulting from it (Cash → Paid, Credit → Not Paid) but editable at any time. Both shown as tags on the Dashboard's recent bills, in History and on the bill itself, using the same badge pattern as Low Stock/Oversold. Paid/Not Paid can be toggled straight from History without opening the bill. *(Added after Phase 7 began, at the owner's request. Migration 006; both columns nullable and not backfilled, so bills raised earlier show no tags rather than a guessed status.)*
 
+- [x] **T5.7** — Add Quotations: their own tab, their own `Q-0001` numbering (separate from invoices and never reset), the same item flow as Billing including units, a customer name and phone with no GSTIN, and a shareable PDF titled "Quotation". No stock movement and no effect on the invoice sequence. Quotations 20+ days old and not yet converted carry an amber "prices may have changed" badge. "Convert to Bill" loads the quotation into the billing cart at its quoted prices; the resulting bill is dated the day of conversion and takes the next real invoice number, and the quotation is kept, marked converted and linked to it. A quotation cannot be converted twice. *(Added after Phase 7 began, at the owner's request. Migration 007; the backup manifest gains an optional `quotations` count, and "Reset shop data" clears quotations and their counter too.)*
+
 ## Phase 6 — Backup & Restore
 
 - [x] **T6.1** — Build `db/backup.ts`: export SQLite DB + manifest to a single shareable file. *(Reads the format as well as writing it, so T6.3 restores something already known to parse.)*

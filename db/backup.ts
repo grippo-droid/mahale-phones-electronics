@@ -71,6 +71,12 @@ export type BackupCounts = {
   bills: number;
   billItems: number;
   settings: number;
+  /**
+   * Added with the quotations table (schema 7). OPTIONAL on purpose: a backup
+   * written before that has no such figure, and a restore of one must not be
+   * failed for a count the file could not have carried.
+   */
+  quotations?: number;
 };
 
 export type BackupManifest = {
@@ -382,14 +388,16 @@ export async function createBackup(
 
   const database = await db.serializeAsync();
 
-  const [schemaVersion, products, bills, billItems, settings, shopName] = await Promise.all([
-    getSchemaVersion(db),
-    countRows(db, 'products'),
-    countRows(db, 'bills'),
-    countRows(db, 'bill_items'),
-    countRows(db, 'app_settings'),
-    shopNameFor(db),
-  ]);
+  const [schemaVersion, products, bills, billItems, settings, quotations, shopName] =
+    await Promise.all([
+      getSchemaVersion(db),
+      countRows(db, 'products'),
+      countRows(db, 'bills'),
+      countRows(db, 'bill_items'),
+      countRows(db, 'app_settings'),
+      countRows(db, 'quotations'),
+      shopNameFor(db),
+    ]);
 
   const manifest: BackupManifest = {
     format: FORMAT_VERSION,
@@ -400,7 +408,7 @@ export async function createBackup(
     shopName,
     databaseBytes: database.length,
     checksum: checksum(database),
-    counts: { products, bills, billItems, settings },
+    counts: { products, bills, billItems, settings, quotations },
   };
 
   const directory = backupDirectory();
@@ -541,13 +549,14 @@ export async function previewRestore(
 }
 
 async function countAllRows(db: SQLiteDatabase): Promise<BackupCounts> {
-  const [products, bills, billItems, settings] = await Promise.all([
+  const [products, bills, billItems, settings, quotations] = await Promise.all([
     countRows(db, 'products'),
     countRows(db, 'bills'),
     countRows(db, 'bill_items'),
     countRows(db, 'app_settings'),
+    countRows(db, 'quotations'),
   ]);
-  return { products, bills, billItems, settings };
+  return { products, bills, billItems, settings, quotations };
 }
 
 export type RestoreOutcome =
@@ -661,7 +670,12 @@ export async function performRestore(
     if (
       after.products !== manifest.counts.products ||
       after.bills !== manifest.counts.bills ||
-      after.billItems !== manifest.counts.billItems
+      after.billItems !== manifest.counts.billItems ||
+      // Only checked when the file carries the figure. A backup written before
+      // quotations existed says nothing about them, and "nothing" must not be
+      // read as "none" — that would fail every older backup on this step.
+      (manifest.counts.quotations !== undefined &&
+        after.quotations !== manifest.counts.quotations)
     ) {
       throw new RestoreFailedError('mismatch', 'verify');
     }
