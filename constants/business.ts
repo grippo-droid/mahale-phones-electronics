@@ -65,9 +65,9 @@ export const BUSINESS_DETAILS: BusinessDetails = {
   // Confirmed — drives CGST/SGST vs IGST. Must stay spelled as in
   // constants/states.ts, which is what the customer's state is matched against.
   state: 'Madhya Pradesh',
-  // Still needed. Not guessed from the city: a wrong pincode on a GST invoice
-  // is worse than a blank one, and a PLACEHOLDER prints as an empty gap.
-  pincode: 'PLACEHOLDER_PINCODE', // PLACEHOLDER — ask the owner
+  // Confirmed by the owner. Deliberately never guessed from the city while it
+  // was unknown: a wrong pincode on a GST invoice is worse than a blank one.
+  pincode: '450331',
   phone: '9826351449',
   email: 'mahale71phones@gmail.com',
   bankName: 'PLACEHOLDER_BANK_NAME', // PLACEHOLDER — optional, bill footer

@@ -135,9 +135,16 @@ from PRD Section 8 and marked with the string `PLACEHOLDER`. Grep for
   invoice prints separately is a judgement, not something he stated. The
   trailing "MP" is dropped as a duplicate of the state field.
 - `phone` — `9826351449`. `email` — `mahale71phones@gmail.com`.
-- The **pincode is still missing** and is deliberately not guessed from the
-  city. A wrong pincode on a GST invoice is worse than a blank one, and a
-  `PLACEHOLDER` prints as an empty gap.
+- `pincode` — `450331`. Held blank until the owner supplied it rather than
+  guessed from the city: a wrong pincode on a GST invoice is worse than a
+  blank one, and a `PLACEHOLDER` prints as an empty gap.
+
+**Every required business detail is now real.** What remains as `PLACEHOLDER`
+is the three optional bank fields and the logo, all of which are meant to be
+optional and all of which print as nothing. Note that
+`hasPlaceholderBusinessDetails()` therefore still returns true — it is not
+consumed anywhere, so that costs nothing today, but it is not a usable "is the
+shop set up?" check while optional fields are counted.
 
 `businessStateGstinMismatch()` re-checks that pairing, and the Settings screen
 runs it live — both fields are editable there and can be made to contradict each
@@ -950,8 +957,9 @@ confirmation of the shop's existing signage/branding.
 
 ## Open decisions (from the planning docs)
 
-- The shop's pincode. Name, GSTIN, state, address, phone and email are all
-  confirmed — see `constants/business.ts`.
+- Bank details for the bill footer — the owner has said these are not needed,
+  so the fields stay as placeholders and print as blank gaps. Not an open
+  question so much as a settled "no"; every required detail is confirmed.
 - Low-stock threshold: global default or per-product
 - Whether to import an existing inventory spreadsheet at launch
 - English-only vs. bilingual (Hindi/Marathi) UI
