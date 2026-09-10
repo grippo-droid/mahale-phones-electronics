@@ -13,7 +13,7 @@ import {
 import { formatDate } from '@/lib/format';
 import { rupeesInWords } from '@/lib/numberToWords';
 import { base64ToBytes, readLogoDataUri } from '@/lib/pdf';
-import { formatQuantity } from '@/lib/units';
+import { formatQuantityWithUnit } from '@/lib/units';
 
 /**
  * The quotation as a PDF (T5.7).
@@ -79,7 +79,7 @@ export function renderQuotationHtml(
           <td class="c">${index + 1}</td>
           <td>${escapeHtml(item.product_name_snapshot)}</td>
           <td class="c">${escapeHtml(item.hsn_code_snapshot ?? '—')}</td>
-          <td class="r">${escapeHtml(formatQuantity(item.qty, item.unit))}</td>
+          <td class="r">${escapeHtml(formatQuantityWithUnit(item.qty, item.unit))}</td>
           <td class="r">${money(rateEach)}</td>
           <td class="r">${money(item.taxable_value)}</td>
           <td class="c">${item.gst_rate_snapshot}%</td>

@@ -49,6 +49,9 @@ export function isBillUnit(value: unknown): value is BillUnit {
  * column is plain TEXT, so a hand-edited database or a backup from a future
  * build can hold anything, and an invoice is not where that should surface.
  */
-export function formatQuantity(qty: number, unit: string | null | undefined): string {
+export function formatQuantityWithUnit(
+  qty: number,
+  unit: string | null | undefined
+): string {
   return isBillUnit(unit) ? `${qty} ${SHORT_FORM[unit]}` : String(qty);
 }

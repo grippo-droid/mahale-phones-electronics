@@ -24,7 +24,7 @@ import {
 import { formatDate, formatRupees } from '@/lib/format';
 import { quotationToCartLines } from '@/lib/quotationDraft';
 import { existingQuotationPdf, generateQuotationPdf } from '@/lib/quotationPdf';
-import { formatQuantity } from '@/lib/units';
+import { formatQuantityWithUnit } from '@/lib/units';
 import { useCartStore } from '@/store/cart';
 import { selectBusiness, useSettingsStore } from '@/store/settings';
 
@@ -197,7 +197,7 @@ export default function QuotationScreen() {
                 {index + 1}. {item.product_name_snapshot}
               </Text>
               <Text style={styles.muted}>
-                {formatQuantity(item.qty, item.unit)} ×{' '}
+                {formatQuantityWithUnit(item.qty, item.unit)} ×{' '}
                 {formatRupees(item.taxable_value / Math.max(item.qty, 1))}
                 {'  ·  '}
                 {item.gst_rate_snapshot}% GST

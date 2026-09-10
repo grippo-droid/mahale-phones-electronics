@@ -571,7 +571,7 @@ confirmation of the shop's existing signage/branding.
   the column existed and for any line the owner leaves alone. A default of
   'Pieces' would reprint years-old invoices with a claim nobody made at the time
   — a negative control covers exactly this, and shows an old line turning from
-  "9" into "9 Pcs". `formatQuantity` prints the bare number whenever the value
+  "9" into "9 Pcs". `formatQuantityWithUnit` prints the bare number whenever the value
   is not one of the four, so a hand-edited database or a backup from a future
   build cannot put an unknown word on an invoice either.
 - **The long form is stored; the short form is printed.** `Meter` in the

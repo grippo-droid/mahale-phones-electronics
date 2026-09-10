@@ -17,7 +17,7 @@ import { supplyTypeFor } from '@/lib/gst';
 import { invoiceNumberToFileName } from '@/lib/invoiceNumber';
 import { logoExists } from '@/lib/logo';
 import { rupeesInWords } from '@/lib/numberToWords';
-import { formatQuantity } from '@/lib/units';
+import { formatQuantityWithUnit } from '@/lib/units';
 
 /**
  * The bill as a PDF (T4.2).
@@ -157,7 +157,7 @@ export function renderBillHtml(
           <td class="c">${index + 1}</td>
           <td>${escapeHtml(item.product_name_snapshot)}</td>
           <td class="c">${escapeHtml(item.hsn_code_snapshot ?? '—')}</td>
-          <td class="r">${escapeHtml(formatQuantity(item.qty, item.unit))}</td>
+          <td class="r">${escapeHtml(formatQuantityWithUnit(item.qty, item.unit))}</td>
           <td class="r">${money(rateEach)}</td>
           <td class="r">${money(item.taxable_value)}</td>
           <td class="c">${item.gst_rate_snapshot}%</td>
