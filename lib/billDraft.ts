@@ -15,12 +15,16 @@
 import type { NewBill, NewBillItem } from '@/db/bills';
 import type { Customer } from '@/lib/customer';
 import { calculateBill, type SupplyType } from '@/lib/gst';
+import type { PaymentType } from '@/lib/payment';
 import type { CartLine } from '@/store/cart';
 
 export type BillDraftInput = {
   lines: CartLine[];
   customer: Customer;
   supplyType: SupplyType;
+  /** Required by the time a bill is built — the screen blocks without it. */
+  paymentType: PaymentType;
+  paid: boolean;
   /** Defaults to now. Passed in so a backdated bill can be tested. */
   date?: Date;
 };
@@ -72,6 +76,8 @@ export function buildNewBill(
 
   return {
     date: input.date,
+    payment_type: input.paymentType,
+    paid: input.paid,
     customer_name: customer.name.trim(),
     customer_phone: customer.phone.trim(),
     customer_address: customer.address.trim() || null,

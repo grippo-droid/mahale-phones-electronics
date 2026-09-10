@@ -100,6 +100,8 @@ Android print sheet, which drives any printer Android can already see.
 - [x] **T5.5** — Build History screen: full chronological bill list, search by customer/phone/invoice number, date range filter. *(The date range is offered as presets — All / Today / Last 7 days / This month / Last month. `listBills` takes an arbitrary from/to, so a custom picker is an addition rather than a rewrite.)*
 - [x] **T5.6** — Wire up tapping a past bill to reopen Bill Result screen (re-share/re-print). *(No separate work: the Bill Result screen and its route were built in T4.3/T4.4, and both the Dashboard's recent list and the History rows push to it.)*
 
+- [x] **T5.6** — Add payment tracking to bills: a required Cash/Credit choice when the bill is generated, and a separate Paid/Not Paid status defaulting from it (Cash → Paid, Credit → Not Paid) but editable at any time. Both shown as tags on the Dashboard's recent bills, in History and on the bill itself, using the same badge pattern as Low Stock/Oversold. Paid/Not Paid can be toggled straight from History without opening the bill. *(Added after Phase 7 began, at the owner's request. Migration 006; both columns nullable and not backfilled, so bills raised earlier show no tags rather than a guessed status.)*
+
 ## Phase 6 — Backup & Restore
 
 - [x] **T6.1** — Build `db/backup.ts`: export SQLite DB + manifest to a single shareable file. *(Reads the format as well as writing it, so T6.3 restores something already known to parse.)*

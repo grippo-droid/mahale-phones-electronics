@@ -94,6 +94,17 @@ export type BillRow = {
   round_off: number;
   grand_total: number;
   pdf_path: string | null;
+  /**
+   * How the sale was settled — see `lib/payment.ts`. NULL on every bill raised
+   * before migration 006, where it was never recorded.
+   */
+  payment_type: string | null;
+  /**
+   * 1 paid, 0 not paid, NULL not recorded. Deliberately independent of
+   * `payment_type`: a credit bill gets paid later and a cash bill can go out
+   * unpaid, so one does not determine the other. It only supplies the default.
+   */
+  paid: number | null;
   created_at: string;
 };
 
@@ -257,6 +268,22 @@ const migration005: Migration = {
   },
 };
 
+const migration006: Migration = {
+  version: 6,
+  name: 'bill_payment',
+  up: async (db) => {
+    // Both nullable with no default, and no backfill, for the same reason as
+    // migration 005: a bill raised before these columns existed recorded no
+    // payment type and no paid status, and NULL is the only value that says so.
+    // Defaulting the old bills to Cash/Paid would be inventing a fact about
+    // money, which is the worst kind to invent.
+    await db.execAsync(`
+      ALTER TABLE bills ADD COLUMN payment_type TEXT;
+      ALTER TABLE bills ADD COLUMN paid INTEGER;
+    `);
+  },
+};
+
 /**
  * Every migration ever shipped, in order. Append only.
  */
@@ -266,6 +293,7 @@ export const MIGRATIONS: Migration[] = [
   migration003,
   migration004,
   migration005,
+  migration006,
 ];
 
 /** The schema version the current build of the app expects. */

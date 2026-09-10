@@ -450,6 +450,51 @@ confirmation of the shop's existing signage/branding.
   combine in the query, and one control (`backToBill`) clears both. Leaving the
   user to work out that two separate things need clearing to see the bill again
   would be needless.
+- **Payment is two fields, not one: how the sale was agreed, and where the
+  money is.** `bills.payment_type` ('Cash' | 'Credit') and `bills.paid`
+  (1/0/NULL), migration 006. A credit bill gets paid a fortnight later without
+  ceasing to be a credit sale, and a cash bill occasionally goes out unpaid.
+  Collapsing them into one field would make the commonest action — marking a
+  credit bill paid — impossible to express. The type supplies the *default*
+  status and nothing more.
+- **Picking a payment type re-applies that type's default status**, including
+  over a status set by hand. That overwrite is deliberate and nearly always
+  harmless, because the two defaults are the two states: an override survives
+  whenever it agrees with the new type's default, and changing the type is
+  itself a statement about how the sale is being settled.
+- **Payment type is required, and is enforced the way an incomplete customer
+  is** — reveal every outstanding error and switch to the step holding them.
+  The "Generate Bill" button stays enabled, per the rule above: a greyed-out
+  button that does not say why is the worst thing to hand a first-time user.
+  The picker lives on the customer step because it is a fact about the deal
+  being struck with this person, not about what is on the bill.
+- **Both columns are nullable with no default, and old bills are not
+  backfilled.** NULL means "never recorded", which is the truth for every bill
+  raised before migration 006. Defaulting them to Cash/Paid would invent a fact
+  about money — a negative control does exactly that and shows an old bill
+  turning into a settled cash sale nobody entered.
+- **`unknown` is not `unpaid`, and the UI keeps them apart.** A missing status
+  renders as an outlined "Not recorded" pill rather than a filled one, so it
+  reads as an absence rather than a state. It stays tappable where a toggle is
+  offered, so an old bill can be classified instead of being locked out of the
+  feature forever; the first tap marks it paid, since a bill being classified at
+  all is nearly always one that has since been settled.
+- **The tags reuse `LowStockBadge`'s shape, and split the colour families.**
+  Type is a neutral fact (grey Cash, blue Credit); status is what the owner
+  scans a list for (green Paid, amber Not Paid). Not Paid is amber rather than
+  red because an unpaid credit bill is ordinary business to chase, not a fault —
+  red stays reserved for things that are wrong, like oversold stock.
+- **The paid toggle is on History only.** That is where the owner works through
+  several bills with payments in hand. The Dashboard's copy is read-only because
+  that screen is for glancing at and a toggle under the thumb would be hit while
+  scrolling; the bill screen's is read-only because a bill opened on its own is
+  being read, not processed. It is shown there all the same, so no screen
+  displays a bill without saying whether it was paid.
+- **The toggle updates the screen first and writes after, and puts the old
+  value back if the write fails.** Waiting for SQLite would put a visible lag on
+  a tap that should feel like a switch. Failing silently is worse: money is
+  exactly the wrong thing to be optimistic about and quiet, so a failure
+  restores the tag and says which bill did not change.
 - **The unit on a bill line belongs to the sale, not to the product.** The same
   cable goes out by the meter to one customer and by the box to another, so
   `bill_items.unit` is per line (migration 005) and `products` has no unit

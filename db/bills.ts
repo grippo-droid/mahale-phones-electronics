@@ -62,6 +62,10 @@ export type NewBill = {
   round_off?: number;
   grand_total: number;
   pdf_path?: string | null;
+  /** 'Cash' or 'Credit'. NULL/omitted means it was not recorded. */
+  payment_type?: string | null;
+  /** true paid, false not paid, NULL/omitted not recorded. */
+  paid?: boolean | null;
   items: NewBillItem[];
 };
 
@@ -111,8 +115,9 @@ export async function createBill(
       `INSERT INTO bills
          (invoice_number, date, customer_name, customer_phone, customer_address,
           customer_gstin, customer_state, subtotal, cgst_total, sgst_total,
-          igst_total, round_off, grand_total, pdf_path, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          igst_total, round_off, grand_total, pdf_path, payment_type, paid,
+          created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       invoiceNumber,
       date,
       input.customer_name.trim(),
@@ -127,6 +132,10 @@ export async function createBill(
       input.round_off ?? 0,
       input.grand_total,
       input.pdf_path ?? null,
+      input.payment_type ?? null,
+      // Stored as 1/0/NULL. Written this way rather than `input.paid ? 1 : 0`
+      // so "not recorded" survives as NULL instead of collapsing into "not paid".
+      input.paid === null || input.paid === undefined ? null : input.paid ? 1 : 0,
       now
     );
 
@@ -342,6 +351,22 @@ export async function countBills(db: SQLiteDatabase = getDatabase()): Promise<nu
  * Records where the generated PDF was saved. Separate from `createBill` because
  * the PDF is rendered after the bill exists — it needs the invoice number (T4.2).
  */
+/**
+ * Marks a bill paid or not paid, long after it was raised.
+ *
+ * Separate from everything else on a bill because this is the one thing about a
+ * finished bill that legitimately changes: the money arrives later. The rest is
+ * a record of what was agreed and must not be edited.
+ */
+export async function setBillPaid(
+  id: number,
+  paid: boolean,
+  db: SQLiteDatabase = getDatabase()
+): Promise<void> {
+  const result = await db.runAsync('UPDATE bills SET paid = ? WHERE id = ?', paid ? 1 : 0, id);
+  if (result.changes === 0) throw new Error(`Bill ${id} not found.`);
+}
+
 export async function setBillPdfPath(
   id: number,
   pdfPath: string | null,

@@ -19,6 +19,7 @@ import { getBillById, setBillPdfPath, type BillWithItems } from '@/db/bills';
 import { formatDate, formatRupees } from '@/lib/format';
 import { rupeesInWords } from '@/lib/numberToWords';
 import { formatQuantity } from '@/lib/units';
+import PaymentTags from '@/components/PaymentTags';
 import {
   buildBillHtml,
   existingBillPdf,
@@ -219,6 +220,12 @@ export default function BillResultScreen() {
               <Text style={styles.value}>{formatDate(bill.date)}</Text>
             </View>
           </View>
+
+          {/* Read-only. Changing the status lives on History, where the owner
+              works through several bills at once; a bill opened on its own is
+              being read, not processed. Shown here all the same, so this screen
+              is not the one place a bill will not say whether it was paid. */}
+          <PaymentTags paymentType={bill.payment_type} paid={bill.paid} />
 
           <View style={styles.divider} />
 

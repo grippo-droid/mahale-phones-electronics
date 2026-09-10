@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import type { Product } from '@/db/products';
 import { EMPTY_CUSTOMER, type Customer, type CustomerField } from '@/lib/customer';
+import { defaultPaidFor, type PaymentType } from '@/lib/payment';
 import type { BillUnit } from '@/lib/units';
 
 /**
@@ -51,9 +52,23 @@ export type CartLine = {
 type CartState = {
   lines: CartLine[];
   customer: Customer;
+  /**
+   * How this sale is being settled. Null until chosen — the bill cannot be
+   * generated without it, and a default here would mean most bills silently
+   * recording whichever one was picked as the default.
+   */
+  paymentType: PaymentType | null;
+  /**
+   * Whether the money has arrived. Follows the payment type when one is picked,
+   * and can be changed afterwards without changing the type.
+   */
+  paid: boolean;
   /** Adds the product, or bumps the quantity if it is already on the bill. */
   addProduct: (product: Product) => void;
   setQty: (productId: number, qty: number) => void;
+  /** Also resets `paid` to the usual status for that type. */
+  setPaymentType: (paymentType: PaymentType) => void;
+  setPaid: (paid: boolean) => void;
   /** Pass null to clear it — tapping the chosen unit again unsets it. */
   setUnit: (productId: number, unit: BillUnit | null) => void;
   changeQty: (productId: number, delta: number) => void;
@@ -78,6 +93,9 @@ function normaliseQty(qty: number): number {
 export const useCartStore = create<CartState>((set) => ({
   lines: [],
   customer: EMPTY_CUSTOMER,
+  paymentType: null,
+  // Meaningless until a payment type is chosen, and never read before then.
+  paid: false,
 
   addProduct: (product) =>
     set((state) => {
@@ -118,6 +136,15 @@ export const useCartStore = create<CartState>((set) => ({
       ),
     })),
 
+  // Picking a type re-applies its usual status, including when the type is
+  // changed after the status was set by hand. That overwrite is deliberate and
+  // nearly always harmless: the two defaults are the two states, so a deliberate
+  // override survives whenever it agrees with the new type's default, and
+  // changing the type is itself a statement about how the sale is being settled.
+  setPaymentType: (paymentType) => set({ paymentType, paid: defaultPaidFor(paymentType) }),
+
+  setPaid: (paid) => set({ paid }),
+
   setUnit: (productId, unit) =>
     set((state) => ({
       lines: state.lines.map((line) =>
@@ -149,7 +176,7 @@ export const useCartStore = create<CartState>((set) => ({
   // Clearing the bill clears the customer as well. The next sale is to a
   // different person, and a name left over from the last one is exactly the
   // sort of thing that reaches an invoice unnoticed.
-  clear: () => set({ lines: [], customer: EMPTY_CUSTOMER }),
+  clear: () => set({ lines: [], customer: EMPTY_CUSTOMER, paymentType: null, paid: false }),
 }));
 
 // ---------------------------------------------------------------------------

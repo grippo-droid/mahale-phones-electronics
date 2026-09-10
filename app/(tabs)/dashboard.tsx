@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import PaymentTags from '@/components/PaymentTags';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { getRecentBills, getSalesSummary } from '@/db/bills';
 import type { BillRow } from '@/db/schema';
@@ -274,6 +275,9 @@ function RecentBillRow({ bill }: { bill: BillRow }) {
         <Text style={styles.billMeta} numberOfLines={1}>
           {bill.invoice_number} · {formatBillWhen(bill.date)}
         </Text>
+        {/* Read-only here. The Dashboard is for glancing at, and a toggle
+            under the thumb would get hit while scrolling. */}
+        <PaymentTags paymentType={bill.payment_type} paid={bill.paid} />
       </View>
       <Text style={styles.billTotal}>{formatRupees(bill.grand_total)}</Text>
       <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
@@ -346,7 +350,7 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   billRowPressed: { backgroundColor: Colors.surface },
-  billMain: { flex: 1, gap: 2 },
+  billMain: { flex: 1, gap: Spacing.xs },
   billCustomer: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.text },
   billMeta: { fontSize: FontSizes.small, color: Colors.textMuted },
   billTotal: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text, fontVariant: ['tabular-nums'] },

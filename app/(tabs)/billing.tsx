@@ -36,6 +36,7 @@ import { buildNewBill, findDeletedProducts, findOversells } from '@/lib/billDraf
 import { resolveSupplyType, validateCustomer, type CustomerField } from '@/lib/customer';
 import { formatRupees } from '@/lib/format';
 import { calculateBill, type SupplyType } from '@/lib/gst';
+import { PAYMENT_TYPES, type PaymentType } from '@/lib/payment';
 import type { BillUnit } from '@/lib/units';
 import { invoiceNumberGenerator } from '@/lib/invoiceNumber';
 import { selectBusinessState, useSettingsStore } from '@/store/settings';
@@ -114,6 +115,10 @@ export default function BillingScreen() {
   const setQty = useCartStore((state) => state.setQty);
   const changeQty = useCartStore((state) => state.changeQty);
   const setUnit = useCartStore((state) => state.setUnit);
+  const paymentType = useCartStore((state) => state.paymentType);
+  const paid = useCartStore((state) => state.paid);
+  const setPaymentType = useCartStore((state) => state.setPaymentType);
+  const setPaid = useCartStore((state) => state.setPaid);
   const removeLine = useCartStore((state) => state.removeLine);
   const setCustomerField = useCartStore((state) => state.setCustomerField);
   const clear = useCartStore((state) => state.clear);
@@ -386,7 +391,14 @@ export default function BillingScreen() {
     setError(null);
 
     try {
-      const draft = buildNewBill({ lines, customer, supplyType: type });
+      // Non-null by here: handleGenerate refuses to reach this without one.
+      const draft = buildNewBill({
+        lines,
+        customer,
+        supplyType: type,
+        paymentType: paymentType!,
+        paid,
+      });
       const bill = await createBill({
         ...draft,
         // Reserved inside the write transaction, so a bill that fails to save
@@ -411,12 +423,16 @@ export default function BillingScreen() {
     } finally {
       setGenerating(false);
     }
-  }, [customer, lines, clear]);
+  }, [customer, lines, paymentType, paid, clear]);
 
   const handleGenerate = useCallback(() => {
     // Force every outstanding error into view rather than only the touched ones,
     // so pressing the button on a half-filled form explains itself.
-    if (!customerValidation.canGenerate) {
+    // Payment type is required, and is reported the same way an incomplete
+    // customer is: reveal every outstanding error and go to the step that holds
+    // them. The button is never disabled — a greyed-out button that does not say
+    // why is the most confusing thing to hand a first-time user.
+    if (!customerValidation.canGenerate || paymentType === null) {
       setShowAllErrors(true);
       setStep('customer');
       return;
@@ -467,7 +483,7 @@ export default function BillingScreen() {
         ]
       );
     }
-  }, [customerValidation.canGenerate, lines, stockById, writeBill]);
+  }, [customerValidation.canGenerate, paymentType, lines, stockById, writeBill]);
 
   const showResults = step === 'items' && browsing;
 
@@ -531,6 +547,14 @@ export default function BillingScreen() {
             onBlurField={handleBlurField}
             businessState={businessState}
             showAllErrors={showAllErrors}
+          />
+
+          <PaymentPicker
+            paymentType={paymentType}
+            paid={paid}
+            onChangeType={setPaymentType}
+            onChangePaid={setPaid}
+            showError={showAllErrors && paymentType === null}
           />
 
           <GstSummary
@@ -652,6 +676,113 @@ export default function BillingScreen() {
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * How the sale is being settled (T5.6).
+ *
+ * On the customer step rather than the items step: it is a fact about the deal
+ * being struck with this person, like their name and their state, not about
+ * what is on the bill. It also has to be seen before "Generate Bill", and this
+ * is the step that button lives on.
+ *
+ * The paid row appears only once a type is chosen, because until then there is
+ * nothing for it to default from and a status with no payment type behind it is
+ * a half-answered question.
+ */
+type PaymentPickerProps = {
+  paymentType: PaymentType | null;
+  paid: boolean;
+  onChangeType: (type: PaymentType) => void;
+  onChangePaid: (paid: boolean) => void;
+  showError: boolean;
+};
+
+function PaymentPicker({
+  paymentType,
+  paid,
+  onChangeType,
+  onChangePaid,
+  showError,
+}: PaymentPickerProps) {
+  return (
+    <View style={styles.paymentCard}>
+      <Text style={styles.paymentHeading}>Payment</Text>
+
+      <View style={styles.paymentRow}>
+        {PAYMENT_TYPES.map((type) => {
+          const selected = paymentType === type;
+          return (
+            <Pressable
+              key={type}
+              onPress={() => onChangeType(type)}
+              style={({ pressed }) => [
+                styles.paymentOption,
+                selected && styles.paymentOptionSelected,
+                pressed && styles.paymentOptionPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              accessibilityLabel={
+                type === 'Cash' ? 'Cash sale, paid now' : 'Credit sale, to be paid later'
+              }>
+              <Text style={[styles.paymentOptionText, selected && styles.paymentOptionTextSelected]}>
+                {type}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {showError ? (
+        <Text style={styles.paymentError}>Choose Cash or Credit before generating the bill.</Text>
+      ) : null}
+
+      {paymentType !== null ? (
+        <>
+          <View style={styles.paymentRow}>
+            <Pressable
+              onPress={() => onChangePaid(true)}
+              style={({ pressed }) => [
+                styles.paymentOption,
+                paid && styles.paidOptionSelected,
+                pressed && styles.paymentOptionPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: paid }}
+              accessibilityLabel="The money has been received">
+              <Text style={[styles.paymentOptionText, paid && styles.paymentOptionTextSelected]}>
+                Paid
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={() => onChangePaid(false)}
+              style={({ pressed }) => [
+                styles.paymentOption,
+                !paid && styles.unpaidOptionSelected,
+                pressed && styles.paymentOptionPressed,
+              ]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: !paid }}
+              accessibilityLabel="The money has not been received yet">
+              <Text style={[styles.paymentOptionText, !paid && styles.paymentOptionTextSelected]}>
+                Not Paid
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Says that the status is not welded to the type, because the
+              default makes it look as though it might be. */}
+          <Text style={styles.paymentHint}>
+            {paymentType === 'Cash'
+              ? 'Cash sales start as paid. Change it if the money has not come in yet.'
+              : 'Credit sales start as not paid. This can be changed later from History.'}
+          </Text>
+        </>
+      ) : null}
+    </View>
+  );
+}
 
 type StepSwitchProps = {
   step: Step;
@@ -914,6 +1045,34 @@ const styles = StyleSheet.create({
     color: Colors.outOfStock,
     fontSize: FontSizes.small,
   },
+  paymentCard: {
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  paymentHeading: { fontSize: FontSizes.title, fontWeight: '700', color: Colors.text },
+  paymentRow: { flexDirection: 'row', gap: Spacing.sm },
+  paymentOption: {
+    flex: 1,
+    minHeight: Spacing.minTapTarget,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.background,
+  },
+  paymentOptionSelected: { backgroundColor: Colors.brand, borderColor: Colors.brand },
+  paidOptionSelected: { backgroundColor: Colors.inStock, borderColor: Colors.inStock },
+  unpaidOptionSelected: { backgroundColor: Colors.lowStock, borderColor: Colors.lowStock },
+  paymentOptionPressed: { backgroundColor: Colors.surface },
+  paymentOptionText: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.textMuted },
+  paymentOptionTextSelected: { color: '#FFFFFF' },
+  paymentHint: { fontSize: FontSizes.small, color: Colors.textMuted },
+  paymentError: { fontSize: FontSizes.small, color: Colors.outOfStock, fontWeight: '600' },
   centered: {
     flex: 1,
     alignItems: 'center',
