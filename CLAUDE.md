@@ -358,6 +358,15 @@ confirmation of the shop's existing signage/branding.
 - **The logo saves on selection, not with the form's Save button.** It is a file
   copy rather than a text field, and pairing it with the button would mean a
   picked image is silently lost by leaving the screen.
+- **`expo-image-picker` is configured with `microphonePermission: false` and
+  `cameraPermission: false`.** Left at their defaults the plugin adds
+  `RECORD_AUDIO` to the manifest — it assumes video recording — and the first
+  preview APK shipped asking a billing app for the microphone. Removing the
+  materialised `permissions` array from `app.json` does nothing; the plugin
+  puts it back at config-resolve time. Setting the option to `false` both skips
+  it and calls `withBlockedPermissions`, so no other package can add it either.
+  The app only ever calls `launchImageLibraryAsync`, so neither is needed.
+  Check with `npx expo config --type introspect`, not by reading `app.json`.
 - **SDK 57 file-system API:** use the `File` / `Directory` / `Paths` classes.
   The old `copyAsync` / `deleteAsync` helpers still exist as names but **throw at
   runtime** — they moved to `expo-file-system/legacy`.
