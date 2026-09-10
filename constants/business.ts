@@ -74,12 +74,15 @@ export const BUSINESS_DETAILS: BusinessDetails = {
   bankAccountNumber: 'PLACEHOLDER_ACCOUNT_NUMBER', // PLACEHOLDER — optional
   bankIfsc: 'PLACEHOLDER_IFSC', // PLACEHOLDER — optional
   logoPath: null, // PLACEHOLDER — optional shop logo
-  // PLACEHOLDER — confirm the convention. {FY} rather than {YYYY} because the
-  // number restarts on 1 April: a calendar year token would let two bills in the
-  // same calendar year but different financial years render the same number.
-  invoiceNumberFormat: 'MPE/{FY}/{SEQ}', // PLACEHOLDER — e.g. MPE/2026-27/0001
-  invoiceResetPolicy: 'financial-year', // PLACEHOLDER — confirm; Indian convention
-  invoiceStartNumber: 1, // PLACEHOLDER — confirm; raise to continue a paper series
+  // Confirmed by the owner. {FY} rather than {YYYY} because the number restarts
+  // on 1 April: a calendar year token would let two bills in the same calendar
+  // year but different financial years render the same number.
+  invoiceNumberFormat: 'MPE/{FY}/{SEQ}', // e.g. MPE/2026-27/0151
+  invoiceResetPolicy: 'financial-year',
+  // The paper book reached 150, so the app continues at 151. This is honoured
+  // only for the very first bill the shop ever raises — see the note in
+  // lib/invoiceNumber.ts. Once any bill exists, the stored counter takes over.
+  invoiceStartNumber: 151,
 };
 
 /** True while any required business detail is still a placeholder. */

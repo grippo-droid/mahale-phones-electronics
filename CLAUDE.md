@@ -200,6 +200,22 @@ confirmation of the shop's existing signage/branding.
   1 April while `{YYYY}` only changes on 1 January — two bills in the same
   calendar year but different financial years would both render `MPE/2026/0001`.
   Hence the placeholder default is `MPE/{FY}/{SEQ}`, not `MPE/{YYYY}/{SEQ}`.
+- **Invoice numbering is settled: `MPE/{FY}/{SEQ}`, financial-year reset,
+  starting at 151.** The paper book reached 150, so the app continues the series
+  rather than restarting it. `{SEQ}` pads to four digits, giving
+  `MPE/2026-27/0151`. From 1 April the sequence restarts and the year token
+  moves with it — `MPE/2027-28/0001` — and a bill backdated into the closed year
+  resumes that year instead, because the counter is stored per period.
+- **The starting number is honoured only for the shop's very first bill**, and
+  that is the one thing to be careful with when handing out a test build.
+  `reserveInvoiceNumber` falls back to `startNumber` only when `hasAnyBills` is
+  false; after any bill exists, the stored counter takes over and changing the
+  setting does nothing to the series. So a phone that has already raised a test
+  bill will number the next one `MPE/2026-27/0001`, not `0151` — verified by
+  test. The fix is to clear the data before real billing starts, not to edit the
+  setting. Separately, saving anything in Settings writes all three invoice
+  values into `app_settings`, after which the `constants/business.ts` defaults
+  are no longer consulted on that install.
 - **Invoice counters are stored one row per period** (`invoice_seq:fy-2026-27` in
   `app_settings`), not a single counter plus a "current period" marker, so a bill
   backdated across 1 April resumes the closed year instead of restarting it.
@@ -768,13 +784,6 @@ confirmation of the shop's existing signage/branding.
 
 - The shop's pincode. Name, GSTIN, state, address, phone and email are all
   confirmed — see `constants/business.ts`.
-- Invoice numbering: the **format only**. The starting number is settled at 151
-  (the paper book reached 150) but is not to be written until the format is
-  chosen — the owner asked for it to be held. The choice is between plain
-  sequential (`{SEQ:1}` with reset `never`, giving 151, 152, …) and the
-  structured format (`MPE/{FY}/{SEQ}` with a financial-year reset, giving
-  `MPE/2026-27/0151`). Both validate today. Note that `{SEQ}` alone pads to four
-  digits — `0151` — so plain continuation of the paper series needs `{SEQ:1}`.
 - Low-stock threshold: global default or per-product
 - Whether to import an existing inventory spreadsheet at launch
 - English-only vs. bilingual (Hindi/Marathi) UI
