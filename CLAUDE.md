@@ -1060,6 +1060,20 @@ says nothing about them:
   screen is not a safety net. `findSafetyCopy()` returns the file or null, and
   the button is rendered only when it is there, so a phone that has never
   restored is not offered a way to undo nothing.
+- **"New Quotation" abandons an edit but keeps a draft** (`beginNew`). The
+  quotation store outlives the editor screen, exactly as the billing cart does,
+  so backing out of an edit left `editingQuotationId` set — and the button then
+  reopened that edit, with the title still reading "Edit Quotation", so saving
+  overwrote the quotation the owner thought they had walked away from. The lines
+  of an abandoned edit belong to that quotation, not to a new one, so they go
+  with it; a draft with no quotation behind it is kept, and the button says
+  "Continue quotation" rather than lying about what it will do. The Dashboard
+  already did this for bills with "New Bill" / "Continue bill".
+- **That decision lives in the store, not in the screen.** It was first written
+  inline in the button's handler, where the harness cannot reach it — a negative
+  control removed the guard and every check still passed, because the test had
+  re-implemented the logic rather than calling it. Logic worth testing goes
+  somewhere testable.
 - **The undo is the same operation on a different file.** `confirmAndRestore`
   takes the uri and a `'file' | 'undo'` mode that changes the wording and
   nothing else. Giving the undo its own copy of the confirmation would be two

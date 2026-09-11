@@ -18,6 +18,10 @@ import { listQuotations } from '@/db/quotations';
 import type { QuotationRow } from '@/db/schema';
 import { formatBillDay, formatRupees } from '@/lib/format';
 import { confirmDeleteQuotation, startEditingQuotation } from '@/lib/quotationActions';
+import {
+  selectQuotationItemCount,
+  useQuotationStore,
+} from '@/store/quotation';
 
 /**
  * Quotations (T5.7) — offers made, separate from bills raised.
@@ -42,6 +46,34 @@ export default function QuotationsScreen() {
   const [quotations, setQuotations] = useState<QuotationRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // The editor keeps whatever was being worked on, exactly as the billing cart
+  // does, so this button has to say which of the two things it will do.
+  const draftCount = useQuotationStore(selectQuotationItemCount);
+  const editingQuotationId = useQuotationStore((state) => state.editingQuotationId);
+  const beginNew = useQuotationStore((state) => state.beginNew);
+
+  /**
+   * Opens the editor, and makes sure "New Quotation" means a new one.
+   *
+   * Backing out of an edit leaves `editingQuotationId` set — the store outlives
+   * the screen on purpose. Without this, tapping "New Quotation" reopened that
+   * abandoned edit: the title still read "Edit Quotation", the button still
+   * read "Save changes", and saving overwrote the quotation the owner thought
+   * they had walked away from. Abandoning an edit therefore discards it; its
+   * lines belong to that quotation, not to a new one.
+   *
+   * A genuine draft — items with no quotation behind them — is kept, and the
+   * button says "Continue quotation" instead. Same reasoning as the Dashboard's
+   * "New Bill" / "Continue bill": landing on someone else's half-built work
+   * under a button marked "New" looks like a fault.
+   */
+  const openEditor = useCallback(() => {
+    beginNew();
+    router.push('/quotation/new');
+  }, [beginNew]);
+
+  const continuing = editingQuotationId === null && draftCount > 0;
 
   useEffect(() => {
     const timer = setTimeout(() => setSearch(searchInput), SEARCH_DEBOUNCE_MS);
@@ -166,11 +198,21 @@ export default function QuotationsScreen() {
 
       <Pressable
         style={({ pressed }) => [styles.newButton, pressed && styles.newButtonPressed]}
-        onPress={() => router.push('/quotation/new')}
+        onPress={openEditor}
         accessibilityRole="button"
-        accessibilityLabel="Make a new quotation">
-        <Ionicons name="add" size={22} color="#FFFFFF" />
-        <Text style={styles.newButtonText}>New Quotation</Text>
+        accessibilityLabel={
+          continuing
+            ? `Continue the quotation being prepared, ${draftCount} items`
+            : 'Make a new quotation'
+        }>
+        <Ionicons
+          name={continuing ? 'arrow-forward-circle' : 'add'}
+          size={22}
+          color="#FFFFFF"
+        />
+        <Text style={styles.newButtonText}>
+          {continuing ? `Continue quotation · ${draftCount}` : 'New Quotation'}
+        </Text>
       </Pressable>
     </View>
   );

@@ -59,6 +59,19 @@ type QuotationState = {
   setCustomerField: (field: QuotationCustomerField, value: string) => void;
   /** Replaces the whole quotation — used when re-opening one to copy. */
   load: (lines: QuotationLine[], customer: QuotationCustomer) => void;
+  /**
+   * Starts a new quotation: abandons an edit, keeps a genuine draft.
+   *
+   * The store outlives the editor screen on purpose, so backing out of an edit
+   * leaves `editingQuotationId` set. Without this, "New Quotation" reopened
+   * that abandoned edit — the title still read "Edit Quotation" and saving
+   * overwrote the quotation the owner had walked away from. Its lines belong
+   * to that quotation, not to a new one, so they go with it.
+   *
+   * A draft with no quotation behind it is left alone, matching the billing
+   * cart, which is deliberately kept across navigation.
+   */
+  beginNew: () => void;
   /** Replaces it and marks the editor as editing that saved quotation. */
   loadForEdit: (
     lines: QuotationLine[],
@@ -137,6 +150,13 @@ export const useQuotationStore = create<QuotationState>((set) => ({
 
   loadForEdit: (lines, customer, quotationId) =>
     set({ lines, customer, editingQuotationId: quotationId }),
+
+  beginNew: () =>
+    set((state) =>
+      state.editingQuotationId === null
+        ? state
+        : { lines: [], customer: EMPTY_QUOTATION_CUSTOMER, editingQuotationId: null }
+    ),
 
   clear: () =>
     set({ lines: [], customer: EMPTY_QUOTATION_CUSTOMER, editingQuotationId: null }),
