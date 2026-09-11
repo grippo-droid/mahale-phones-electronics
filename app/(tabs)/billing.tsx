@@ -495,7 +495,20 @@ export default function BillingScreen() {
     } finally {
       setGenerating(false);
     }
-  }, [customer, lines, paymentType, paid, sourceQuotationId, editingBillId, clear]);
+    // businessState is in here because writeBill reads it to resolve the supply
+    // type, and that decides the tax heads on a permanent record. Left out, a
+    // cart open while the shop's own state is corrected in Settings would be
+    // billed against the old value.
+  }, [
+    customer,
+    businessState,
+    lines,
+    paymentType,
+    paid,
+    sourceQuotationId,
+    editingBillId,
+    clear,
+  ]);
 
   const handleGenerate = useCallback(() => {
     // Force every outstanding error into view rather than only the touched ones,
