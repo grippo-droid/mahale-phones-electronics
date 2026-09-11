@@ -19,6 +19,22 @@ export const Colors = {
   background: '#FFFFFF',
   surface: '#F4F6F8',
   border: '#DADCE0',
+
+  /**
+   * Tinted grounds for the colours above, used by banners and nudges.
+   *
+   * They were seven literals scattered across four files before T7.4, and two
+   * of them were ambers one shade apart — `#FFF6E5` on the Dashboard's
+   * low-stock banner and `#FFF4E5` on the product form's warning — which is
+   * exactly the drift that a palette exists to prevent. A tint is a colour
+   * decision like any other and belongs here with the colour it tints.
+   */
+  brandTint: '#E8F0FB',
+  brandTintPressed: '#D6E4F7',
+  inStockTint: '#E8F5E9',
+  lowStockTint: '#FFF6E5',
+  lowStockTintPressed: '#FDEBCD',
+  outOfStockTint: '#FDECEA',
 } as const;
 
 /** Large tap targets — the app is used quickly, often one-handed (Frontend Spec 3). */

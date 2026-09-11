@@ -509,9 +509,29 @@ says nothing about them:
   and the search term, so leaving with a chip selected, adding a product, and
   coming back re-queried nothing — none of the dependencies had changed, and the
   list quietly no longer matched inventory. Inventory already reloaded on focus
-  and does not have the bug. The query is now a callback both the effect and the
-  focus handler call, guarded by a request id so a slower earlier reply cannot
-  overwrite a newer one.
+  and does not have the bug. The query is a callback, guarded by a request id so
+  a slower earlier reply cannot overwrite a newer one.
+- **`useFocusEffect` is the ONLY loader on every list screen, and a plain
+  `useEffect` beside it is a second query rather than a safety net.** It re-runs
+  whenever its callback changes while the screen is focused, so a keystroke, a
+  chip or a toggle already goes through it. History worked this out first; the
+  fix above then added a focus handler to Inventory, Billing and the quotation
+  editor while leaving each screen's original effect in place, so all three ran
+  every query twice. T7.4 deleted them.
+  
+  Two of those effects had also been wrapped in `await Promise.resolve()` to get
+  past `react-hooks/set-state-in-effect` — which silenced the rule and kept the
+  duplicate. A lint rule pointing at a real defect is not a thing to reschedule
+  around. Guarded by the `effects` suite, since lint cannot see a duplicate.
+- **State that follows a prop or a route parameter is adjusted during render,
+  not in an effect.** Four of the six `set-state-in-effect` errors were this
+  shape: the quantity field following the stepper, Settings' draft following a
+  restore, Inventory's filter following the Dashboard's banner. React re-runs
+  the component before committing, so the stale value is never painted — where
+  an effect shows it for a frame and then replaces it. Each keeps a small
+  "last seen" state and compares, which is React's own documented pattern. The
+  fifth was not state at all: a route parameter that will not parse is an
+  answer, so `bill/[id]` derives it.
 - **A newly added product appears in ALPHABETICAL position, not at the top.**
   `listProducts` orders by name, so under "All" with thirty-odd products a new
   one lands mid-list and off-screen, while under its own category chip the list
@@ -519,6 +539,40 @@ says nothing about them:
   is not one — the header count moves immediately. Worth remembering before
   chasing a cache that does not exist. What it argues for is the save
   confirmation in T7.3, not a refetch change.
+- **A screen-level failure is `components/ErrorBanner.tsx`, everywhere.** The
+  same message had grown four treatments across eight places: a tinted box with
+  an icon on the Dashboard and History, an icon and no box on Quotations, a bare
+  line of red text on Inventory, Billing, Settings and both quotation screens.
+  Red text alone on a white screen does not read as a message — it reads as the
+  layout having broken — and nothing told the owner these were the same kind of
+  thing. It is deliberately not the shape of `Toast`: a banner sits in the
+  layout and stays until the condition clears, because a failure that needs
+  acting on must not disappear on its own. Margins stay with the screen, since
+  some sit inside a padded scroll view and some do not.
+- **Tints live in the palette with the colour they tint** (`brandTint`,
+  `inStockTint`, `lowStockTint`, `outOfStockTint`, plus two pressed variants).
+  They were seven literals across four files, two of them ambers one shade apart
+  — `#FFF6E5` on the Dashboard's low-stock banner and `#FFF4E5` on the product
+  form's warning. A tint is a colour decision like any other.
+- **T7.4 was a light tidy, not a full pass against the Frontend Spec, and that
+  was the owner's call.** What was fixed was drift and breakage: the error
+  banner, the tints, the missing route titles, two full-screen spinners left at
+  the default small size, and the six lint errors. What is still open, so it is
+  not rediscovered as news:
+
+    - There is no radius scale. `8` is used 45 times, `12` twelve times and `10`
+      ten times, and the three are not telling anything apart.
+    - There is no weight scale either; `'700'` and `'600'` are picked per style.
+    - No screen has been read line by line against `docs/04_Frontend_Spec_Document.md`.
+    - Nothing has been checked at a large system font size or in dark mode.
+
+  None of that is broken today. It is the work a real visual pass would be, and
+  it should be scoped deliberately rather than folded into another ticket.
+- **A pushed route needs an entry in the root `Stack` even when the screen sets
+  its own title.** `quotation/new` and `quotation/[id]` had none, and a dynamic
+  route with no entry falls back to the route name — so the header read "[id]"
+  while a quotation loaded, and stayed that way if it had been deleted. The
+  screen's own `Stack.Screen` only lands once it knows what it is showing.
 - **On Billing, a category chip and a typed search both mean "browsing".** They
   combine in the query, and one control (`backToBill`) clears both. Leaving the
   user to work out that two separate things need clearing to see the bill again

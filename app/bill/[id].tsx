@@ -73,14 +73,18 @@ export default function BillResultScreen() {
 
   const billId = Number.parseInt(id ?? '', 10);
 
-  useEffect(() => {
-    let cancelled = false;
+  /**
+   * A route parameter that is not a number is not a bill still loading — it is
+   * already the answer, and it cannot change while this screen is mounted. So
+   * it is derived rather than written into `error` from the effect: the
+   * "could not be found" wording below is the same either way, and there is no
+   * state to keep in step.
+   */
+  const validId = Number.isInteger(billId);
 
-    if (!Number.isInteger(billId)) {
-      setError('That bill could not be found.');
-      setLoading(false);
-      return;
-    }
+  useEffect(() => {
+    if (!validId) return;
+    let cancelled = false;
 
     getBillById(billId)
       .then((found) => {
@@ -98,7 +102,7 @@ export default function BillResultScreen() {
     return () => {
       cancelled = true;
     };
-  }, [billId]);
+  }, [billId, validId]);
 
   /**
    * Produces the PDF file, reusing one already on disk (T4.4).
@@ -179,7 +183,7 @@ export default function BillResultScreen() {
     }
   }, [bill, business]);
 
-  if (loading) {
+  if (validId && loading) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={Colors.brand} />
@@ -454,7 +458,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     padding: Spacing.md,
     borderRadius: 8,
-    backgroundColor: '#E8F5E9',
+    backgroundColor: Colors.inStockTint,
   },
   savedText: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.inStock },
 

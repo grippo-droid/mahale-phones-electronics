@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 
+import ErrorBanner from '@/components/ErrorBanner';
 import BillItemRow from '@/components/BillItemRow';
 import CategoryChips from '@/components/CategoryChips';
 import CustomerDetailsForm from '@/components/CustomerDetailsForm';
@@ -246,20 +247,11 @@ export default function BillingScreen() {
   // No clearing when browsing stops: `showResults` already requires `browsing`,
   // so a stale list is never on screen, and the next browse overwrites it
   // before it could be.
-  // Called a microtask later rather than straight from the effect body: the
-  // first thing loadResults does is show the spinner, and a synchronous state
-  // write while an effect runs is the cascading-render pattern React warns
-  // about. A microtask is imperceptible and keeps the effect body clean.
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      await Promise.resolve();
-      if (active) await loadResults();
-    })();
-    return () => {
-      active = false;
-    };
-  }, [loadResults]);
+  //
+  // There is no separate effect driving this. The focus handler below already
+  // re-runs whenever `loadResults` changes, which covers every keystroke and
+  // every chip — a plain effect on the same callback ran a second identical
+  // query for each of them.
 
   const refreshStock = useCallback(async () => {
     const ids = useCartStore.getState().lines.map((line) => line.productId);
@@ -642,7 +634,7 @@ export default function BillingScreen() {
         </View>
       ) : null}
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <ErrorBanner message={error} style={styles.errorBanner} />
 
       {step === 'customer' ? (
         <ScrollView
@@ -1152,12 +1144,7 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: FontSizes.body, color: Colors.text },
 
-  error: {
-    marginHorizontal: Spacing.md,
-    marginBottom: Spacing.sm,
-    color: Colors.outOfStock,
-    fontSize: FontSizes.small,
-  },
+  errorBanner: { marginHorizontal: Spacing.md, marginBottom: Spacing.sm },
   paymentCard: {
     gap: Spacing.sm,
     padding: Spacing.md,

@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { memo, useEffect, useState } from 'react';
+import { memo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
@@ -52,9 +52,21 @@ function BillItemRow({
   // only valid whole numbers reach the store.
   const [qtyText, setQtyText] = useState(String(line.qty));
 
-  useEffect(() => {
+  /**
+   * Follow the stored quantity when it changes from outside this field — the
+   * +/− stepper, or the same product being added again from the search list.
+   *
+   * Compared during render rather than in an effect. The field is what the
+   * owner is looking at while tapping the stepper, so a frame showing the old
+   * number before an effect corrects it is exactly the wrong thing; React
+   * re-runs this component before committing, so the stale number is never
+   * painted. It only follows an actual change, so typing is never interrupted.
+   */
+  const [syncedQty, setSyncedQty] = useState(line.qty);
+  if (syncedQty !== line.qty) {
+    setSyncedQty(line.qty);
     setQtyText(String(line.qty));
-  }, [line.qty]);
+  }
 
   const totals = calculateLine(
     {

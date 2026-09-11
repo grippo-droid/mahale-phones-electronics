@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 
+import ErrorBanner from '@/components/ErrorBanner';
 import PaymentTags from '@/components/PaymentTags';
 import { confirmDeleteBill, startEditingBill } from '@/lib/billActions';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
@@ -332,12 +333,7 @@ export default function HistoryScreen() {
         })}
       </ScrollView>
 
-      {error ? (
-        <View style={styles.errorBox}>
-          <Ionicons name="alert-circle" size={18} color={Colors.outOfStock} />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
+      <ErrorBanner message={error} style={styles.errorBanner} />
 
       {/* What the current filter adds up to. This is why the total covers the
           whole matching set rather than the loaded page: searching a phone
@@ -558,18 +554,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: FontSizes.small, color: Colors.textMuted, fontWeight: '600' },
   chipTextActive: { color: '#FFFFFF' },
 
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.xs,
-    marginHorizontal: Spacing.md,
-    marginBottom: Spacing.sm,
-    padding: Spacing.md,
-    borderRadius: 8,
-    backgroundColor: '#FDECEA',
-  },
-  errorText: { flex: 1, fontSize: FontSizes.small, color: Colors.outOfStock },
-
+  errorBanner: { marginHorizontal: Spacing.md, marginBottom: Spacing.sm },
   summaryRow: {
     flexDirection: 'row',
     alignItems: 'center',

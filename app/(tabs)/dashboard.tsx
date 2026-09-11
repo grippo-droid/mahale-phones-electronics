@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import ErrorBanner from '@/components/ErrorBanner';
 import PaymentTags from '@/components/PaymentTags';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { getRecentBills, getSalesSummary, setBillPaid } from '@/db/bills';
@@ -193,12 +194,7 @@ export default function DashboardScreen() {
         </Text>
       </View>
 
-      {error ? (
-        <View style={styles.errorBox}>
-          <Ionicons name="alert-circle" size={18} color={Colors.outOfStock} />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
+      <ErrorBanner message={error} />
 
       {/* Today's takings get the most weight on the screen: it is the number
           the owner opens the app to see. */}
@@ -369,16 +365,6 @@ const styles = StyleSheet.create({
   shopName: { fontSize: FontSizes.title, fontWeight: '700', color: Colors.text },
   today: { fontSize: FontSizes.small, color: Colors.textMuted },
 
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.xs,
-    padding: Spacing.md,
-    borderRadius: 8,
-    backgroundColor: '#FDECEA',
-  },
-  errorText: { flex: 1, fontSize: FontSizes.small, color: Colors.outOfStock },
-
   headline: {
     padding: Spacing.lg,
     borderRadius: 12,
@@ -436,9 +422,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: Colors.lowStock,
-    backgroundColor: '#FFF6E5',
+    backgroundColor: Colors.lowStockTint,
   },
-  lowBannerPressed: { backgroundColor: '#FDEBCD' },
+  lowBannerPressed: { backgroundColor: Colors.lowStockTintPressed },
   lowBannerText: { flex: 1 },
   lowBannerTitle: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.lowStock },
   lowBannerSub: { fontSize: FontSizes.small, color: Colors.lowStock },
@@ -452,9 +438,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: Colors.brand,
-    backgroundColor: '#E8F0FB',
+    backgroundColor: Colors.brandTint,
   },
-  backupNudgePressed: { backgroundColor: '#D6E4F7' },
+  backupNudgePressed: { backgroundColor: Colors.brandTintPressed },
   backupNudgeText: { flex: 1 },
   backupNudgeTitle: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.brand },
   backupNudgeSub: { fontSize: FontSizes.small, color: Colors.brand },

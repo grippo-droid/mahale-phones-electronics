@@ -67,6 +67,13 @@ export default function RootLayout() {
         <Stack.Screen name="inventory/[id]" options={{ title: 'Edit Product' }} />
         <Stack.Screen name="bill/new" options={{ title: 'New Bill' }} />
         <Stack.Screen name="bill/[id]" options={{ title: 'Bill' }} />
+        {/* Declared here so there is always a sensible title. Both screens set
+            their own once they know what they are showing — the reference
+            number, or "Edit Quotation" — but a dynamic route with no entry
+            falls back to the route name, so the header read "[id]" while a
+            quotation loaded and stayed that way if it was not found. */}
+        <Stack.Screen name="quotation/new" options={{ title: 'New Quotation' }} />
+        <Stack.Screen name="quotation/[id]" options={{ title: 'Quotation' }} />
       </Stack>
 
       {/* Mounted once, above every screen, because several actions report on a

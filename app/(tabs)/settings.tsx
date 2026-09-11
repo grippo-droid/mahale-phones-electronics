@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as Sharing from 'expo-sharing';
 import { File } from 'expo-file-system';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 import {
   ActivityIndicator,
@@ -19,6 +19,7 @@ import {
   View,
 } from 'react-native';
 
+import ErrorBanner from '@/components/ErrorBanner';
 import StatePicker from '@/components/StatePicker';
 import { businessStateGstinMismatch, type BusinessDetails } from '@/constants/business';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
@@ -175,9 +176,27 @@ export default function SettingsScreen() {
   // would be a second record of the same fact, free to disagree with the file.
   const [undoUri, setUndoUri] = useState<string | null>(null);
 
-  // Re-seed if the store is reloaded underneath (a Phase 6 restore, say).
-  useEffect(() => setDraft(toDraft(business)), [business]);
-  useEffect(() => setInvoiceDraft(invoiceConfig), [invoiceConfig]);
+  /**
+   * Re-seed if the store is reloaded underneath (a Phase 6 restore, say).
+   *
+   * Compared during render rather than in an effect. Both selectors return the
+   * store slice itself, so the reference only changes when the shop's details
+   * actually do — a restore, or a save — and in that moment the form is showing
+   * another shop's data. An effect would let it paint once before correcting
+   * itself; adjusting during render re-runs this component before anything is
+   * committed, so the wrong values never reach the screen.
+   */
+  const [seededBusiness, setSeededBusiness] = useState(business);
+  if (seededBusiness !== business) {
+    setSeededBusiness(business);
+    setDraft(toDraft(business));
+  }
+
+  const [seededInvoice, setSeededInvoice] = useState(invoiceConfig);
+  if (seededInvoice !== invoiceConfig) {
+    setSeededInvoice(invoiceConfig);
+    setInvoiceDraft(invoiceConfig);
+  }
 
   const set = useCallback((field: keyof Draft, value: string) => {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -915,7 +934,7 @@ export default function SettingsScreen() {
           />
         </Section>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        <ErrorBanner message={error} />
 
         <Pressable
           style={({ pressed }) => [
@@ -1328,7 +1347,6 @@ const styles = StyleSheet.create({
   },
   logoPickerText: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.brand },
 
-  error: { fontSize: FontSizes.small, color: Colors.outOfStock },
 
   saveButton: {
     flexDirection: 'row',

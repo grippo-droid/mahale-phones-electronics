@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import ErrorBanner from '@/components/ErrorBanner';
 import CategoryChips from '@/components/CategoryChips';
 import ProductCard from '@/components/ProductCard';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
@@ -49,16 +50,24 @@ export default function InventoryScreen() {
    *
    * Keyed on `at` as well as `filter` because the value alone does not change
    * between two taps of the same banner: turn the filter off by hand, go back
-   * and tap it again, and an effect watching only `filter` would not re-run —
-   * the banner would appear to do nothing.
+   * and tap it again, and watching only `filter` would not notice — the banner
+   * would appear to do nothing.
+   *
+   * Adjusted during render rather than in an effect. An effect would paint the
+   * unfiltered list for a frame and then replace it, and React re-runs this
+   * component before committing anything, so nothing flickers. The first
+   * arrival needs no comparison at all: `lowStockOnly` is seeded from the
+   * parameter above, and `appliedAt` starts level with it.
    *
    * It only ever switches the filter ON. Arriving at this tab with no parameter
    * is just the owner opening Inventory, and that should not silently undo a
    * filter they set themselves.
    */
-  useEffect(() => {
+  const [appliedAt, setAppliedAt] = useState(params.at);
+  if (params.at !== appliedAt) {
+    setAppliedAt(params.at);
     if (params.filter === 'low') setLowStockOnly(true);
-  }, [params.filter, params.at]);
+  }
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchInput), SEARCH_DEBOUNCE_MS);
@@ -85,11 +94,16 @@ export default function InventoryScreen() {
     }
   }, [debouncedSearch, category, lowStockOnly]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  // Reload on return from add/edit so a saved change is visible immediately.
+  /**
+   * The only loader. `useFocusEffect` re-runs whenever its callback changes
+   * while the screen is focused, so a new search term, chip or low-stock
+   * toggle re-queries through this too — a second plain `useEffect` on `load`
+   * was not redundancy but a second query for every one of those, which is
+   * the same conclusion History reached.
+   *
+   * It also reloads on return from add/edit, so a saved change is visible
+   * immediately.
+   */
   useFocusEffect(
     useCallback(() => {
       load();
@@ -145,7 +159,7 @@ export default function InventoryScreen() {
         </Text>
       </Pressable>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <ErrorBanner message={error} style={styles.errorBanner} />
 
       {loading ? (
         <View style={styles.centered}>
@@ -286,7 +300,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingBottom: Spacing.sm,
   },
-  error: { color: Colors.outOfStock, fontSize: FontSizes.body, paddingHorizontal: Spacing.md },
+  errorBanner: { marginHorizontal: Spacing.md, marginBottom: Spacing.sm },
   centered: { alignItems: 'center', justifyContent: 'center', padding: Spacing.xl, gap: Spacing.sm },
   emptyContent: { flexGrow: 1, justifyContent: 'center' },
   emptyTitle: {

@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 
+import ErrorBanner from '@/components/ErrorBanner';
 import CategoryChips from '@/components/CategoryChips';
 import ProductPickRow from '@/components/ProductPickRow';
 import QuotationItemRow from '@/components/QuotationItemRow';
@@ -149,25 +150,15 @@ export default function NewQuotationScreen() {
     }
   }, [browsing, hasSearchTerm, hasCategory, debouncedSearch, category]);
 
-  // Called a microtask later rather than straight from the effect body: the
-  // first thing loadResults does is show the spinner, and a synchronous state
-  // write while an effect runs is the cascading-render pattern React warns
-  // about. A microtask is imperceptible and keeps the effect body clean.
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      await Promise.resolve();
-      if (active) await loadResults();
-    })();
-    return () => {
-      active = false;
-    };
-  }, [loadResults]);
-
   /**
-   * Also on focus, so returning from anywhere that could have changed the
-   * catalogue re-reads it. The chip list is refreshed with it: a product saved
-   * under a category not previously in use adds a chip.
+   * The only thing that runs it. `useFocusEffect` re-runs whenever its
+   * callback changes while the screen is focused, so every keystroke and chip
+   * goes through here — a plain effect on the same callback was a second
+   * identical query for each of them, not a safety net.
+   *
+   * Being on focus also means returning from anywhere that could have changed
+   * the catalogue re-reads it. The chip list is refreshed with it: a product
+   * saved under a category not previously in use adds a chip.
    */
   useFocusEffect(
     useCallback(() => {
@@ -303,7 +294,7 @@ export default function NewQuotationScreen() {
         allLabel="All products"
       />
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <ErrorBanner message={error} style={styles.errorBanner} />
 
       {browsing ? (
         <FlatList
@@ -481,12 +472,7 @@ const styles = StyleSheet.create({
   inputError: { borderColor: Colors.outOfStock },
   fieldError: { fontSize: FontSizes.small, color: Colors.outOfStock },
   hint: { fontSize: FontSizes.small, color: Colors.textMuted, marginTop: Spacing.sm },
-  error: {
-    marginHorizontal: Spacing.md,
-    marginBottom: Spacing.sm,
-    color: Colors.outOfStock,
-    fontSize: FontSizes.small,
-  },
+  errorBanner: { marginHorizontal: Spacing.md, marginBottom: Spacing.sm },
   bar: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import ErrorBanner from '@/components/ErrorBanner';
 import QuotationStatusBadge from '@/components/QuotationStatusBadge';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import {
@@ -155,7 +156,7 @@ export default function QuotationScreen() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color={Colors.brand} />
+        <ActivityIndicator size="large" color={Colors.brand} />
       </View>
     );
   }
@@ -331,7 +332,7 @@ export default function QuotationScreen() {
         </Pressable>
       </View>
 
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      <ErrorBanner message={error} />
     </ScrollView>
   );
 }
@@ -411,5 +412,4 @@ const styles = StyleSheet.create({
     borderColor: Colors.outOfStock,
   },
   dangerButtonText: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.outOfStock },
-  error: { fontSize: FontSizes.small, color: Colors.outOfStock },
 });

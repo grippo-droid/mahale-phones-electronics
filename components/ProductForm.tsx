@@ -626,7 +626,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
     padding: Spacing.sm,
     borderRadius: 8,
-    backgroundColor: '#FFF4E5',
+    backgroundColor: Colors.lowStockTint,
     borderWidth: 1,
     borderColor: Colors.lowStock,
   },

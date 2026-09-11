@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import ErrorBanner from '@/components/ErrorBanner';
 import QuotationStatusBadge from '@/components/QuotationStatusBadge';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { listQuotations } from '@/db/quotations';
@@ -169,16 +170,11 @@ export default function QuotationsScreen() {
         </Pressable>
       </View>
 
-      {error ? (
-        <View style={styles.errorBox}>
-          <Ionicons name="alert-circle" size={18} color={Colors.outOfStock} />
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
+      <ErrorBanner message={error} style={styles.errorBanner} />
 
       {loading ? (
         <View style={styles.centered}>
-          <ActivityIndicator color={Colors.brand} />
+          <ActivityIndicator size="large" color={Colors.brand} />
         </View>
       ) : (
         <FlatList
@@ -331,14 +327,8 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', gap: Spacing.sm, padding: Spacing.xl },
   emptyTitle: { fontSize: FontSizes.title, fontWeight: '700', color: Colors.text },
   emptyBody: { fontSize: FontSizes.body, color: Colors.textMuted, textAlign: 'center' },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginHorizontal: Spacing.md,
-    marginBottom: Spacing.sm,
-  },
-  errorText: { flex: 1, fontSize: FontSizes.small, color: Colors.outOfStock },
+  errorBanner: { marginHorizontal: Spacing.md, marginBottom: Spacing.sm },
+
   newButton: {
     position: 'absolute',
     left: Spacing.md,
