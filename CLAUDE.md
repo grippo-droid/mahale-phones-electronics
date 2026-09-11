@@ -405,6 +405,35 @@ says nothing about them:
   way they stop being the same is a template that recomputes. This is also why
   it has its own `summariseStoredItems` instead of reusing `summariseByRate`
   from `lib/gst.ts` — that one works on freshly calculated lines.
+- **The invoice prints what has been received, and that block is the ONE part
+  of the document that can legitimately change after issue** (T9.3). Everything
+  else here renders from the stored bill and never recalculates, precisely so a
+  reprint years later is the same page. A ledger is not like that: another
+  instalment arrives and the same invoice number produces a different document.
+
+  So it is kept apart rather than folded in. It sits BELOW the signature, under
+  its own heading and border, and carries the date it was drawn — "As at 20/09/
+  2026. Payments recorded after this date are not shown." Without that line two
+  copies in a customer's hand contradict each other with nothing to explain why;
+  with it they are two statements made at different times, which is what they
+  are. A test asserts the invoice body above the signature is byte-identical
+  with and without payments.
+- **An empty ledger prints NOTHING — not a heading, not a zero, not a status.**
+  A bill with no payment recorded renders byte for byte as it did before this
+  existed, and a negative control that prints the block regardless fails four
+  checks. The document must not begin asserting something about money that
+  nobody entered.
+- **An entry with no date prints an em dash, never a fallback.** Those are the
+  rows migration 010 created from bills already marked paid. Substituting the
+  bill's own date would put a date on the CUSTOMER'S copy that nobody ever
+  entered — a negative control does exactly that and is caught.
+- **`buildBillHtml` reads the ledger, not the callers.** Both the share path and
+  the print path go through it, so neither can render an invoice that forgets
+  the payments — the same reason the logo is read there. A failed read yields no
+  block rather than a failed bill: the invoice is complete without it.
+- **The payments styles live in `lib/pdf.ts`, not `documentChrome`.** A
+  quotation has no payments and never will, and the shared module is only what
+  the two documents genuinely have in common.
 - **Which tax heads to print is read from the stored amounts, not the states.**
   If the shop's state is later corrected in Settings, a reprint of an old bill
   must still show what the customer was actually charged. The one exception is a

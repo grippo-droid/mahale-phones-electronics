@@ -11,12 +11,14 @@ import {
   stateWithCode,
 } from '@/lib/documentChrome';
 import type { BillWithItems } from '@/db/bills';
+import { listPayments, type BillPayment } from '@/db/payments';
 import type { BillItemRow } from '@/db/schema';
 import { formatDate } from '@/lib/format';
 import { supplyTypeFor } from '@/lib/gst';
 import { invoiceNumberToFileName } from '@/lib/invoiceNumber';
 import { logoExists } from '@/lib/logo';
 import { rupeesInWords } from '@/lib/numberToWords';
+import { paymentTotalsFor } from '@/lib/payment';
 import { formatQuantityWithUnit } from '@/lib/units';
 
 /**
@@ -133,7 +135,39 @@ export type RenderOptions = {
    * removes the question entirely. `generateBillPdf` does the reading.
    */
   logoDataUri?: string | null;
+  /**
+   * The bill's payment ledger (T9.3). Passed in for the same reason the logo
+   * is: this function stays pure, and `buildBillHtml` does the reading.
+   *
+   * An EMPTY list prints nothing at all. An invoice with no payment recorded
+   * must look exactly as it did before this existed — the document should not
+   * start asserting something about money that nobody entered.
+   */
+  payments?: BillPayment[];
+  /**
+   * When the payments block was drawn. Defaults to now.
+   *
+   * A parameter so the output is reproducible in a test, and so the date is
+   * decided once rather than by whenever the template happens to run.
+   */
+  renderedAt?: Date;
 };
+
+/**
+ * Styles for the payments block, kept here rather than in `documentChrome`.
+ *
+ * A quotation has no payments and never will, and the shared module is
+ * deliberately only the chrome the two documents have in common.
+ */
+const PAYMENT_STYLES = `
+  .payments { margin-top: 18px; padding: 10px; border: 1px solid #333;
+              page-break-inside: avoid; break-inside: avoid; }
+  .pay { width: 60%; }
+  .pay td, .pay th { padding: 3px 6px; }
+  .pay-total td { border-top: 1px solid #333; font-weight: 700; }
+  .pay-standing { margin-top: 6px; font-weight: 700; }
+  .pay-asat { margin-top: 2px; font-size: 9px; }
+`;
 
 export function renderBillHtml(
   bill: BillWithItems,
@@ -148,6 +182,84 @@ export function renderBillHtml(
     real(business.bankAccountNumber) ? `A/c: ${real(business.bankAccountNumber)}` : '',
     real(business.bankIfsc) ? `IFSC: ${real(business.bankIfsc)}` : '',
   ].filter(Boolean);
+
+  /**
+   * What has been received, and when (T9.3).
+   *
+   * ---------------------------------------------------------------------------
+   * This is the one part of the document that can change after the bill is
+   * issued, and it is deliberately kept apart from the invoice because of that.
+   *
+   * Everything above is fixed the moment the bill is saved: the same figures
+   * print the same way for ever, which is the whole reason this module renders
+   * from the STORED bill and never recalculates. A payment ledger is not like
+   * that — another instalment arrives and the same invoice number produces a
+   * different page. So the block sits BELOW the signature, under its own
+   * heading, and carries the date it was drawn. Without that date two copies in
+   * a customer's hand contradict each other with nothing to explain why; with
+   * it, they are two statements made at different times, which is what they are.
+   *
+   * It prints only when something has actually been recorded. A bill with an
+   * empty ledger renders exactly as it did before this existed.
+   * ---------------------------------------------------------------------------
+   */
+  const payments = options.payments ?? [];
+  const paymentsBlock =
+    payments.length === 0
+      ? ''
+      : (() => {
+          const totals = paymentTotalsFor(
+            bill.grand_total,
+            payments.map((payment) => payment.amount)
+          );
+
+          const rows = payments
+            .map(
+              (payment) => `
+                <tr>
+                  <td>${
+                    // NULL only for entries migration 010 created, from a bill
+                    // already marked paid before the ledger existed. The amount
+                    // was recorded; the date never was, and printing a guess
+                    // here would put a date on the customer's copy that nobody
+                    // ever entered.
+                    payment.paid_on ? escapeHtml(formatDate(payment.paid_on)) : '&mdash;'
+                  }</td>
+                  <td class="r">${money(payment.amount)}</td>
+                </tr>`
+            )
+            .join('');
+
+          const standing =
+            totals.state === 'paid'
+              ? totals.overpaidBy > 0
+                ? `Paid in full &mdash; ₹${money(totals.overpaidBy)} received above the invoice total`
+                : 'Paid in full'
+              : totals.state === 'partial'
+                ? `Part paid &mdash; ₹${money(totals.outstanding)} outstanding`
+                : `Nothing outstanding has been received &mdash; ₹${money(totals.outstanding)} due`;
+
+          return `
+            <div class="payments">
+              <div class="sub">Payments received</div>
+              <table class="pay">
+                <thead>
+                  <tr><th>Date</th><th class="r">Amount</th></tr>
+                </thead>
+                <tbody>${rows}</tbody>
+                <tfoot>
+                  <tr class="pay-total">
+                    <td>Total received</td>
+                    <td class="r">₹${money(totals.paidAmount)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+              <div class="pay-standing">${standing}</div>
+              <div class="muted pay-asat">As at ${escapeHtml(
+                formatDate(options.renderedAt ?? new Date())
+              )}. Payments recorded after this date are not shown.</div>
+            </div>`;
+        })();
 
   const itemRows = bill.items
     .map((item, index) => {
@@ -199,7 +311,7 @@ export function renderBillHtml(
 <html>
 <head>
 <meta charset="utf-8">
-<style>${DOCUMENT_STYLES}</style>
+<style>${DOCUMENT_STYLES}${PAYMENT_STYLES}</style>
 </head>
 <body>
   <div class="title">Tax Invoice</div>
@@ -297,6 +409,8 @@ export function renderBillHtml(
     </div>
   </div>
 
+  ${paymentsBlock}
+
   <div class="note">This is a computer-generated invoice.</div>
 </body>
 </html>`;
@@ -392,13 +506,24 @@ export async function readLogoDataUri(logoPath: string | null): Promise<string |
  *
  * The output is identical either way: `generateBillPdf` renders this same HTML.
  */
+/**
+ * The single place a bill becomes HTML.
+ *
+ * The ledger is read HERE rather than by the callers, for the reason the logo
+ * is: both the share path and the print path go through this function, so
+ * neither can render an invoice that forgets the payments. A failed read
+ * yields no payments block rather than a failed bill — the invoice itself is
+ * complete without it.
+ */
 export async function buildBillHtml(
   bill: BillWithItems,
   business: BusinessDetails
 ): Promise<string> {
-  return renderBillHtml(bill, business, {
-    logoDataUri: await readLogoDataUri(business.logoPath),
-  });
+  const [logoDataUri, payments] = await Promise.all([
+    readLogoDataUri(business.logoPath),
+    listPayments(bill.id).catch(() => [] as BillPayment[]),
+  ]);
+  return renderBillHtml(bill, business, { logoDataUri, payments });
 }
 
 /**
