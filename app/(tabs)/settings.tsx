@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -32,6 +33,7 @@ import {
   RestoreFailedError,
 } from '@/db/backup';
 import { resetShopData } from '@/db/reset';
+import { accessFor, contactsReader, type ContactsAccess } from '@/lib/contacts';
 import { showToast } from '@/store/toast';
 import { getLastBackupAt, type BusinessSettingField } from '@/db/settings';
 import { describeBackupStatus } from '@/lib/backupStatus';
@@ -177,6 +179,17 @@ export default function SettingsScreen() {
   const [undoUri, setUndoUri] = useState<string | null>(null);
 
   /**
+   * Whether the address-book type-ahead on the billing and quotation screens
+   * can work (T9.1).
+   *
+   * Read from Android every time this screen is focused rather than kept as a
+   * setting of our own: the owner can change it in Android Settings while this
+   * app is open, and a stored copy would then be telling them something that is
+   * no longer true. Null until the first read, which shows nothing at all.
+   */
+  const [contactsAccess, setContactsAccess] = useState<ContactsAccess | null>(null);
+
+  /**
    * Re-seed if the store is reloaded underneath (a Phase 6 restore, say).
    *
    * Compared during render rather than in an effect. Both selectors return the
@@ -212,13 +225,21 @@ export default function SettingsScreen() {
     }
   }, []);
 
+  const refreshContactsAccess = useCallback(() => {
+    contactsReader
+      .getPermission()
+      .then((permission) => setContactsAccess(accessFor(permission)))
+      .catch(() => setContactsAccess('unavailable'));
+  }, []);
+
   // Re-read on focus rather than once: a backup can be made from here and the
   // row is also carried in by a restore.
   useFocusEffect(
     useCallback(() => {
       getLastBackupAt().then(setLastBackup).catch(() => setLastBackup(null));
       refreshUndo();
-    }, [refreshUndo])
+      refreshContactsAccess();
+    }, [refreshUndo, refreshContactsAccess])
   );
 
   const backupStatus = useMemo(() => describeBackupStatus(lastBackup), [lastBackup]);
@@ -912,6 +933,55 @@ export default function SettingsScreen() {
 
           {backupError ? <Note tone="warning" text={backupError} /> : null}
         </Section>
+
+        {/* Only shown once Android has actually been asked. There is nothing to
+            say on a phone where the question has not come up yet, and a row
+            about a permission nobody has been asked for would be the app
+            raising it unprompted — which is the nagging this feature is
+            deliberately built to avoid. */}
+        {contactsAccess === null ? null : (
+          <Section
+            title="Contacts"
+            subtitle="Used only to fill in a customer's name and number while making a bill or a quotation.">
+            {contactsAccess === 'ready' ? (
+              <Note
+                tone="ok"
+                text="Allowed. Start typing a customer's name and matching contacts appear underneath. Nothing from your contacts is saved — only the name and number you pick go onto the bill."
+              />
+            ) : (
+              <>
+                <Note
+                  tone="info"
+                  text={
+                    contactsAccess === 'ask'
+                      ? 'Not set up yet. You will be asked the next time you type a customer’s name.'
+                      : 'Not allowed. Customer names and numbers are typed in by hand, which works exactly as before.'
+                  }
+                />
+                {/* Android stops showing its own dialog after a refusal, so the
+                    app cannot ask again however it is worded. This is the way
+                    back, and it is here rather than on the billing screen
+                    because the owner has to come looking for it — that is what
+                    keeps it from being a nag. */}
+                {contactsAccess === 'unavailable' ? (
+                  <Pressable
+                    style={({ pressed }) => [styles.fixButton, pressed && styles.logoButtonPressed]}
+                    onPress={() => {
+                      Linking.openSettings().catch(() => {
+                        // Nothing to recover: the feature is optional and the
+                        // form works without it.
+                      });
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Open this app’s permissions in Android Settings">
+                    <Ionicons name="open-outline" size={18} color={Colors.brand} />
+                    <Text style={styles.fixButtonText}>Turn on in Android Settings</Text>
+                  </Pressable>
+                ) : null}
+              </>
+            )}
+          </Section>
+        )}
 
         <Section
           title="Start fresh"

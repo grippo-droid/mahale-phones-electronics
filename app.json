@@ -17,7 +17,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "allowBackup": false
+      "allowBackup": false,
+      "blockedPermissions": ["android.permission.WRITE_CONTACTS"]
     },
     "ios": {
       "icon": "./assets/expo.icon"
@@ -38,6 +39,7 @@
       ],
       "expo-sqlite",
       "expo-sharing",
+      "expo-contacts",
       [
         "expo-image-picker",
         {

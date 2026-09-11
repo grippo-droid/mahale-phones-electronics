@@ -16,6 +16,7 @@ import {
 
 import ErrorBanner from '@/components/ErrorBanner';
 import CategoryChips from '@/components/CategoryChips';
+import ContactSuggestions, { useContactSuggestions } from '@/components/ContactSuggestions';
 import ProductPickRow from '@/components/ProductPickRow';
 import QuotationItemRow from '@/components/QuotationItemRow';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
@@ -201,6 +202,10 @@ export default function NewQuotationScreen() {
     [lines]
   );
 
+  // The same address-book type-ahead as the billing screen, filling the name
+  // and the number together. See components/ContactSuggestions.tsx.
+  const contacts = useContactSuggestions(customer.name);
+
   const nameError = customer.name.trim().length === 0 ? 'A name is needed.' : null;
   const phoneError = customer.phone.trim().length === 0 ? 'A phone number is needed.' : null;
   const canSave = lines.length > 0 && !nameError && !phoneError;
@@ -362,6 +367,13 @@ export default function NewQuotationScreen() {
               placeholderTextColor={Colors.textMuted}
             />
             {showErrors && nameError ? <Text style={styles.fieldError}>{nameError}</Text> : null}
+            <ContactSuggestions
+              state={contacts}
+              onPick={(suggestion) => {
+                setCustomerField('name', suggestion.name);
+                setCustomerField('phone', suggestion.phone);
+              }}
+            />
 
             <Text style={styles.label}>Phone</Text>
             <TextInput

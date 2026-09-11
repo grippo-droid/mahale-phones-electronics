@@ -3,6 +3,7 @@ import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
+import ContactSuggestions, { useContactSuggestions } from '@/components/ContactSuggestions';
 import StatePicker from '@/components/StatePicker';
 import {
   gstinStateMismatch,
@@ -63,6 +64,11 @@ export default function CustomerDetailsForm({
   const warningsFor = (field: CustomerField) =>
     validation.warnings.filter((issue) => issue.field === field);
 
+  // Type-ahead over the address book. It fills the name and the number
+  // together, because a contact that gave only the name would leave the more
+  // error-prone of the two fields still to be typed.
+  const contacts = useContactSuggestions(customer.name);
+
   const gstin = parseGstin(customer.gstin);
   const mismatch = gstinStateMismatch(customer);
   const supplyType = resolveSupplyType(customer.state, businessState);
@@ -70,16 +76,25 @@ export default function CustomerDetailsForm({
 
   return (
     <View style={styles.form}>
-      <Field
-        label="Customer name"
-        required
-        value={customer.name}
-        onChangeText={(text) => onChangeField('name', text)}
-        onBlur={() => onBlurField('name')}
-        placeholder="Full name"
-        autoCapitalize="words"
-        error={errorFor('name')}
-      />
+      <View>
+        <Field
+          label="Customer name"
+          required
+          value={customer.name}
+          onChangeText={(text) => onChangeField('name', text)}
+          onBlur={() => onBlurField('name')}
+          placeholder="Full name"
+          autoCapitalize="words"
+          error={errorFor('name')}
+        />
+        <ContactSuggestions
+          state={contacts}
+          onPick={(suggestion) => {
+            onChangeField('name', suggestion.name);
+            onChangeField('phone', suggestion.phone);
+          }}
+        />
+      </View>
 
       <Field
         label="Phone"

@@ -143,4 +143,13 @@ Android print sheet, which drives any printer Android can already see.
 
 ---
 
+## Phase 9 — Owner Requests (raised after Phase 7 closed)
+
+Features the owner asked for once the app was in his hands. Numbered separately
+so Phase 8's delivery sequence is not renumbered around them.
+
+- [x] **T9.1** — Fill a customer's name and phone from the phone's address book, on Billing and on the quotation editor. *(Type-ahead beneath the Name field, the same shape as the product search — not a picker screen. Picking a suggestion fills the name and the number together. The field stays free text throughout: the feature is an assist and never a requirement, and it disappears entirely when the permission is refused. A contact with several numbers becomes one row per number rather than a sub-picker. Read-only access: `expo-contacts` adds `WRITE_CONTACTS` unconditionally and it is blocked in `app.json`. Nothing from the address book is stored, so nothing reaches a backup. A refusal is permanent — Android stops asking, so the app does too — with a row in Settings as the only way back. Reverses the Security doc's original "no contacts" line; recorded there as a reversal.)*
+
+---
+
 **Note on sequencing:** Phases 1-4 form the core usable app (inventory + billing + bill output). Phases 5-6 add convenience and safety. Phase 7 is polish. It's reasonable to get Phases 1-4 working end-to-end first, test it with your father, then continue — rather than building everything before any real-world feedback.

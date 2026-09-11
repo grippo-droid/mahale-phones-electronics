@@ -62,6 +62,8 @@ without flagging it to the owner first and explaining why.
 - **zustand** — shared app state (bill-in-progress cart, low-stock count, settings)
 - **expo-print** → PDF, **expo-sharing** → Android share sheet, **expo-file-system** → backups
 - **expo-image-picker** — choosing the shop logo in Settings (added in T4.1)
+- **expo-contacts** — read-only address-book lookup for the customer's name
+  and number (added in T9.1). `WRITE_CONTACTS` is blocked in `app.json`.
 - **EAS Build** → APK, installed directly (no Play Store in v1)
 
 Expo SDK 57 changed several APIs. Check the versioned docs at
@@ -441,6 +443,66 @@ says nothing about them:
   it and calls `withBlockedPermissions`, so no other package can add it either.
   The app only ever calls `launchImageLibraryAsync`, so neither is needed.
   Check with `npx expo config --type introspect`, not by reading `app.json`.
+- **The customer's name field reads the address book; nothing else does, and
+  nothing is kept** (T9.1). Type two characters and matching contacts appear
+  beneath the field; picking one fills the name AND the number, because filling
+  only the name would leave the more error-prone of the two still to be typed.
+  The field stays free text — most walk-in customers are in nobody's contacts,
+  and a shop cannot be made to add someone to the address book before it can
+  bill them.
+- **`expo-contacts`' config plugin adds `WRITE_CONTACTS` as well as
+  `READ_CONTACTS`, and has no option to stop it.** Its only option is
+  `contactsPermission`, an iOS usage string. So `app.json` lists
+  `android.blockedPermissions: ["android.permission.WRITE_CONTACTS"]`, which
+  emits `tools:node="remove"`. This is the `RECORD_AUDIO` trap again — a plugin
+  asking for more than the app uses — and the same rule applies: **check with
+  `npx expo config --type introspect`, never by reading `app.json`.** What to
+  look for is that `android.permissions` holds `READ_CONTACTS` and that
+  `WRITE_CONTACTS` appears only under `android.blockedPermissions`.
+- **A contact's number is reduced with `phoneDigits` before it reaches the
+  field, and that is a correctness fix rather than tidiness.**
+  `normaliseCustomer` stores the phone as typed and History searches it with
+  LIKE, so a bill filled with "+91 98263 51449" would not be found by searching
+  "9826351449" — and one customer's spend would split across two formats, which
+  is exactly the History feature the owner uses. Filling with the digits puts
+  the same thing in the field that hand-typing would. A negative control fills
+  the raw number and seven checks fail.
+- **A refusal is permanent, and the app never asks twice.** `accessFor` maps
+  Android's answer to `ready` / `ask` / `unavailable`, with no fourth state for
+  "denied but worth another go". Android stops presenting its dialog after a
+  denial, so an app that keeps requesting only produces a control that appears
+  to do nothing. The way back is a row in Settings that opens Android's own
+  permission screen — there because the owner has to go looking for it, which
+  is what keeps it from being a nag. That row is hidden entirely until Android
+  has actually been asked once: a row about a permission nobody has been asked
+  for would be the app raising it unprompted.
+- **The explanation shown before Android's dialog is informational, not a
+  confirmation.** "Not now" is a real answer and costs nothing. It is needed
+  because the system dialog says only that an app wants Contacts, never why a
+  billing app would — and that gap is the difference between a reasonable
+  request and an alarming one.
+- **"Not now" is remembered in memory only, for the life of the app process.**
+  It is a postponement rather than an answer, and the real answer lives with
+  Android. Asking once more the next time the app is opened is not nagging;
+  asking again on the next bill would be. Deliberately NOT stored in
+  `app_settings` — a stored copy would be a second record of a fact Android
+  already owns, free to disagree with it after a change made in Android
+  Settings while the app was open. Same reasoning as `converted_bill_id`.
+- **The suggestion list renders in normal flow, never as a floating dropdown.**
+  Both forms that use it sit inside a `ScrollView`, which clips an
+  absolutely-positioned overlay on Android. Pushing the form down also cannot
+  cover the field being typed into.
+- **A contact with three numbers becomes three rows, not a sub-picker.**
+  Picking is then one tap, and there is no second state to design, dismiss or
+  get stuck in. The name repeats down the rows, which is what makes them read
+  as one person.
+- **What the harness can and cannot say about this.** The address book, the
+  permission dialog and the list rendering are all device-only. The reader is
+  injected (`ContactsReader`, the same seam as `RestoreIo`) so the parts where
+  bugs actually live are reachable without one: the number that lands in the
+  field, the permission ladder, and the flattening. A green `contacts` suite
+  says nothing about whether the type-ahead appears on a phone — that has to be
+  looked at.
 - **SDK 57 file-system API:** use the `File` / `Directory` / `Paths` classes.
   The old `copyAsync` / `deleteAsync` helpers still exist as names but **throw at
   runtime** — they moved to `expo-file-system/legacy`.
