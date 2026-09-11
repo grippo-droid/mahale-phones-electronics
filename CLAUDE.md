@@ -160,6 +160,57 @@ what the shop currently has. Settings living in the database also means a Phase
 The brand colour in `constants/theme.ts` is also a placeholder, pending
 confirmation of the shop's existing signage/branding.
 
+## The test harness is a stand-in, and its gaps are where the bugs live
+
+Tests run in a scratchpad harness: the TypeScript in `db/`, `lib/`, `constants/`
+and `store/` compiled to CommonJS, with hand-written shims for `expo-sqlite`
+(over `node:sqlite`), `expo-file-system`, `expo-print` and `zustand`. It is
+fast, needs no device, and has caught a great deal.
+
+**Every bug that has reached the owner's phone got there through a place where
+the shim was kinder than the real library.** Three times now, and the shape is
+always the same: the suite is green, the code is wrong, and the harness simply
+never modelled the thing that breaks.
+
+- **The WAL header.** `node:sqlite` has no deserialize, so the shim wrote the
+  bytes to a file and opened that — where a WAL header is harmless. It also ran
+  the test database as `:memory:`, so WAL never engaged and every backup the
+  suite produced carried a rollback header. The bug was unreproducible by
+  construction.
+- **`withExclusiveTransactionAsync`.** The shim ran the callback on the same
+  connection, which is the sane implementation. The real one opens a SECOND
+  connection by `databasePath` — which for a deserialized backup is the literal
+  `':memory:'`, i.e. a different, empty database. Migrations ran against
+  nothing. Restoring an older backup failed on the owner's phone while the
+  suite stayed green.
+
+**So the rule: when a bug is found on the device, fix the HARNESS first.** Make
+the shim behave the way the real library does, watch the suite go red for the
+real reason, and only then fix the code. Both times this immediately surfaced
+something else — the WAL fix exposed a subarray-aliasing bug, and the
+transaction fix exposed a test that had been spying on the wrong connection. A
+green suite after a device bug means the harness is still lying.
+
+**Known gaps, as of migration 009.** These are not covered, and a passing suite
+says nothing about them:
+
+- **No real in-memory database.** `node:sqlite` cannot deserialize, so the shim
+  writes bytes to a temp file and then reports `databasePath` as `':memory:'` —
+  faithful in the property that matters for transactions, not in general.
+- **No native connection cache.** `SQLiteModule.kt` reference-counts
+  connections by path (`addRef`/`release`), which is what made a close-and-swap
+  restore silently do nothing. The shim has no equivalent.
+- **No filesystem.** `expo-file-system` is stubbed to throw, so backup writing,
+  sharing, the safety copy and PDF files are exercised only through their pure
+  parts.
+- **No renderer.** Screen behaviour is checked by reading source, which catches
+  wiring being removed and nothing else. Anything about touch handling — the
+  nested `Pressable` on the paid tag, for instance — has to be checked on a
+  real build.
+- **No concurrency.** `node:sqlite` is synchronous on one connection, so races
+  serialise. A test asserting "only one of two concurrent writes won" passes
+  whether or not the guard exists; say so rather than implying coverage.
+
 ## Decisions already made (do not re-litigate)
 
 - **Categories** are a fixed dropdown of six: CCTV, RO, Tube Light, Bulb,

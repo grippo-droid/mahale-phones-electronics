@@ -97,18 +97,56 @@ export async function runMigrations(db: SQLiteDatabase): Promise<void> {
   );
 
   for (const migration of pending) {
-    // Each migration is atomic: either the DDL and its version row both land, or
-    // neither does. A half-applied migration on the owner's phone is unfixable
-    // remotely, so this matters more here than the transaction overhead costs.
-    await db.withExclusiveTransactionAsync(async (txn) => {
-      await migration.up(txn);
-      await txn.runAsync(
+    /**
+     * Each migration is atomic: either the DDL and its version row both land,
+     * or neither does. A half-applied migration on the owner's phone is
+     * unfixable remotely, so this matters more than the transaction overhead.
+     *
+     * ---------------------------------------------------------------------
+     * NEVER use `withExclusiveTransactionAsync` here.
+     *
+     * It does not open a transaction on THIS connection. It calls
+     * `Transaction.createAsync`, which opens a SECOND connection by
+     * `db.databasePath` and runs the work against that one
+     * (`expo-sqlite/build/SQLiteDatabase.js`). For a database that lives in a
+     * file the second connection opens the same file, so it works and nothing
+     * looks wrong.
+     *
+     * A restore does not migrate a file. `deserializeDatabaseAsync` returns a
+     * database whose `databasePath` is the literal string ':memory:', and every
+     * ':memory:' connection is its own private, EMPTY database. So the
+     * migration ran against an empty database and died on
+     * "no such table: bill_items" — surfacing as "The backup could not be
+     * brought up to date with this version of the app."
+     *
+     * It only ever bit when a restore actually had migrations to run, which is
+     * why restoring a same-schema backup worked perfectly and restoring the
+     * owner's older one did not.
+     *
+     * Plain BEGIN/COMMIT on the connection in hand is atomic, works for a file
+     * and for memory alike, and needs no second connection at all.
+     * ---------------------------------------------------------------------
+     */
+    await db.execAsync('BEGIN IMMEDIATE');
+    try {
+      await migration.up(db);
+      await db.runAsync(
         'INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)',
         migration.version,
         migration.name,
         new Date().toISOString()
       );
-    });
+      await db.execAsync('COMMIT');
+    } catch (error) {
+      // Best effort: if the transaction is already gone the rollback throws,
+      // and that must not replace the error that actually explains the failure.
+      try {
+        await db.execAsync('ROLLBACK');
+      } catch {
+        // ignored on purpose
+      }
+      throw error;
+    }
   }
 }
 
