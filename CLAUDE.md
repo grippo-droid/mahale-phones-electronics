@@ -779,6 +779,17 @@ confirmation of the shop's existing signage/branding.
   year — but the far commoner case is raising a bill and coming here to check it
   saved, and a History screen that does not show the bill just made is the worse
   of the two failures.
+- **No PIN lock and no encryption at rest in v1 — descoped, not deferred**
+  (T7.6, T7.7). The Security & Access Document offers both as recommendations
+  rather than requirements, and its decision table now records the answer. The
+  phone's own lock screen is the access boundary; a second lock on a till app
+  opened dozens of times a day buys little and costs friction every time.
+
+  One caveat, recorded so it is not a surprise later: retrofitting encryption
+  onto a database that already holds the shop's data is more work than starting
+  with it, so reversing this after launch costs more than it would have today.
+  That is a known, accepted trade rather than an oversight. Do not re-raise
+  either as outstanding work.
 - **Bluetooth thermal printing is out of scope, not deferred.** The shop bills
   over WhatsApp: the customer gets the PDF on their phone, which T4.2–T4.4
   already deliver. A thermal printer would add a native dependency, a pairing
@@ -1042,6 +1053,5 @@ confirmation of the shop's existing signage/branding.
 - Low-stock threshold: global default or per-product
 - Whether to import an existing inventory spreadsheet at launch
 - English-only vs. bilingual (Hindi/Marathi) UI
-- Optional app-level PIN/biometric lock (T7.6) and SQLite encryption at rest (T7.7)
 
 If something in the documents is ambiguous, ask the owner rather than guessing.

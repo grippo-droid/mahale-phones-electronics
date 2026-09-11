@@ -50,10 +50,10 @@ None of this is classified as highly sensitive (no payment card data, no passwor
 
 ## 8. Recommendations Summary (Decide Before Build)
 
-| Item | Recommendation | Decision Needed |
+| Item | Recommendation | Decision |
 |---|---|---|
-| App-level PIN/biometric lock | Optional, low effort | Yes/No |
-| SQLite encryption at rest | Optional, moderate effort | Yes/No |
+| App-level PIN/biometric lock | Optional, low effort | **No — descoped for v1** (T7.6) |
+| SQLite encryption at rest | Optional, moderate effort | **No — descoped for v1** (T7.7) |
 | Backup file handling guidance | Document for owner, no code needed | Owner practice |
 
 These are genuinely optional for a small single-shop app — the PRD's v1 scope does not require them — but worth a deliberate decision rather than an oversight.
