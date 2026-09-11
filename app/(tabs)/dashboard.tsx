@@ -13,7 +13,7 @@ import {
 
 import PaymentTags from '@/components/PaymentTags';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import { getRecentBills, getSalesSummary } from '@/db/bills';
+import { getRecentBills, getSalesSummary, setBillPaid } from '@/db/bills';
 import type { BillRow } from '@/db/schema';
 import { countLowStockProducts, countProducts } from '@/db/products';
 import { getLastBackupAt } from '@/db/settings';
@@ -59,9 +59,56 @@ export default function DashboardScreen() {
 
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<BillRow[]>([]);
+  /** Bill ids with a paid/not-paid write in flight, so a tag cannot be double-tapped. */
+  const [savingPaid, setSavingPaid] = useState<Set<number>>(new Set());
+  const [paidError, setPaidError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Marks a recent bill paid or not paid, in place.
+   *
+   * The same shape as History's: on screen first, written after, and the old
+   * value put back with a message if the write fails. Money is the wrong thing
+   * to be optimistic about and then quiet.
+   *
+   * No confirmation, because a tap is undone by another tap — a dialog on a
+   * reversible one-tap change is the kind that teaches people to dismiss
+   * dialogs without reading them.
+   *
+   * The month total is deliberately NOT adjusted here: it counts what was
+   * billed, not what has been collected, so a bill changing hands does not
+   * change it.
+   */
+  const togglePaid = useCallback(async (bill: BillRow, next: boolean) => {
+    const previous = bill.paid;
+
+    setPaidError(null);
+    setSavingPaid((current) => new Set(current).add(bill.id));
+    setRecent((current) =>
+      current.map((row) => (row.id === bill.id ? { ...row, paid: next ? 1 : 0 } : row))
+    );
+
+    try {
+      await setBillPaid(bill.id, next);
+    } catch (err) {
+      setRecent((current) =>
+        current.map((row) => (row.id === bill.id ? { ...row, paid: previous } : row))
+      );
+      setPaidError(
+        `${bill.invoice_number} could not be updated, so it is unchanged. ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    } finally {
+      setSavingPaid((current) => {
+        const remaining = new Set(current);
+        remaining.delete(bill.id);
+        return remaining;
+      });
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -251,8 +298,17 @@ export default function DashboardScreen() {
             No bills yet. Tap New Bill above to make the first one.
           </Text>
         ) : (
-          recent.map((row) => <RecentBillRow key={row.id} bill={row} />)
+          recent.map((row) => (
+            <RecentBillRow
+              key={row.id}
+              bill={row}
+              onTogglePaid={togglePaid}
+              busy={savingPaid.has(row.id)}
+            />
+          ))
         )}
+
+        {paidError ? <Text style={styles.paidError}>{paidError}</Text> : null}
       </View>
 
     </ScrollView>
@@ -261,7 +317,15 @@ export default function DashboardScreen() {
 
 // ---------------------------------------------------------------------------
 
-function RecentBillRow({ bill }: { bill: BillRow }) {
+function RecentBillRow({
+  bill,
+  onTogglePaid,
+  busy,
+}: {
+  bill: BillRow;
+  onTogglePaid: (bill: BillRow, next: boolean) => void;
+  busy: boolean;
+}) {
   return (
     <Pressable
       style={({ pressed }) => [styles.billRow, pressed && styles.billRowPressed]}
@@ -275,9 +339,16 @@ function RecentBillRow({ bill }: { bill: BillRow }) {
         <Text style={styles.billMeta} numberOfLines={1}>
           {bill.invoice_number} · {formatBillWhen(bill.date)}
         </Text>
-        {/* Read-only here. The Dashboard is for glancing at, and a toggle
-            under the thumb would get hit while scrolling. */}
-        <PaymentTags paymentType={bill.payment_type} paid={bill.paid} />
+        {/* Tappable, like History. The row itself navigates into the bill, so
+            the tag is a nested Pressable: the inner one takes the touch and the
+            row's own onPress does not fire. The same nesting already carries
+            History's overflow button. */}
+        <PaymentTags
+          paymentType={bill.payment_type}
+          paid={bill.paid}
+          onTogglePaid={(next) => onTogglePaid(bill, next)}
+          busy={busy}
+        />
       </View>
       <Text style={styles.billTotal}>{formatRupees(bill.grand_total)}</Text>
       <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
@@ -340,6 +411,7 @@ const styles = StyleSheet.create({
   recent: { gap: Spacing.xs },
   sectionTitle: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text, marginBottom: Spacing.xs },
   emptyRecent: { fontSize: FontSizes.small, color: Colors.textMuted, paddingVertical: Spacing.sm },
+  paidError: { fontSize: FontSizes.small, color: Colors.outOfStock, paddingTop: Spacing.sm },
   billRow: {
     flexDirection: 'row',
     alignItems: 'center',

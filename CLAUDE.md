@@ -634,12 +634,34 @@ confirmation of the shop's existing signage/branding.
   scans a list for (green Paid, amber Not Paid). Not Paid is amber rather than
   red because an unpaid credit bill is ordinary business to chase, not a fault —
   red stays reserved for things that are wrong, like oversold stock.
-- **The paid toggle is on History only.** That is where the owner works through
-  several bills with payments in hand. The Dashboard's copy is read-only because
-  that screen is for glancing at and a toggle under the thumb would be hit while
-  scrolling; the bill screen's is read-only because a bill opened on its own is
-  being read, not processed. It is shown there all the same, so no screen
-  displays a bill without saying whether it was paid.
+- **The paid tag is tappable on History and the Dashboard, read-only on the
+  bill screen** (T5.10). Both lists are where the owner works through bills with
+  payments in hand; a bill opened on its own is being read rather than
+  processed. It is shown on all three, so no screen displays a bill without
+  saying whether it was paid. An earlier version of this note argued the
+  Dashboard's copy should stay read-only to avoid mis-taps while scrolling —
+  that was wrong about how the screen is used, and the tag is a small target
+  with its own press state rather than a row-wide one.
+- **A tappable tag has to look tappable, and an icon is what does that.** Beside
+  a genuinely read-only Cash/Credit pill, an identical-looking status pill reads
+  as decoration. The interactive one carries a small arrows icon and a press
+  state; the icon is the half that works before anyone touches it, since a press
+  state is only discoverable by pressing. A negative control removed the icon
+  from the filled pill and initially PASSED, because the assertion was an OR
+  across both pill variants and the rare outlined one still had its own — the
+  check is now per variant.
+- **No confirmation on the toggle.** One tap is undone by another, and a dialog
+  on a reversible one-tap change is exactly what teaches someone to dismiss
+  dialogs unread — which then costs on the confirmations that matter, like
+  deleting a bill or restoring a backup.
+- **The tag is a nested Pressable inside a row that navigates.** The inner one
+  takes the touch, so tapping the tag does not also open the bill. History's
+  overflow button already relies on the same nesting, so the two stand or fall
+  together — worth confirming on a real build rather than assuming, since the
+  harness has no renderer to exercise it.
+- **The Dashboard's month total is NOT adjusted when a bill is marked paid.** It
+  counts what was billed, not what has been collected, so a bill changing hands
+  does not change what was sold that month.
 - **The toggle updates the screen first and writes after, and puts the old
   value back if the write fails.** Waiting for SQLite would put a visible lag on
   a tap that should feel like a switch. Failing silently is worse: money is

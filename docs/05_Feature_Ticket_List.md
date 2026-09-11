@@ -6,9 +6,13 @@
 
 **How to use this:** Hand these one at a time, roughly in order. Each ticket is scoped to be independently buildable and testable. Check off as completed.
 
-**Status:** 41 of 56 live tickets. Phases 0–6 complete. Two tickets added to Phase 3 at the owner's request, both done:
-T3.7 and T3.8. Three dropped: the Bluetooth printing tickets T4.5–T4.7 (see
-below).
+**Status:** 49 of 61 live tickets done. Phases 0–6 complete; Phase 7 is the
+remainder. Seven tickets were added after the original plan, all at the owner's
+request and all done: T3.7 and T3.8 (category chips, frequently sold), T3.9
+(units on bill lines), T5.6 (payment type and paid status), T5.7 (quotations),
+T5.8 and T5.9 (editing and deleting bills and quotations), T5.10 (tappable paid
+status) and T6.4 (reset shop data). Three Bluetooth printing tickets are dropped
+and two security tickets descoped — see below and Phase 7.
 
 The app takes a sale end to end — search stock, build a cart, capture the
 customer, compute GST, write a numbered bill that decrements inventory, then
@@ -24,19 +28,17 @@ on them, so this removes a dependency rather than leaving a gap. A printed copy
 is still available: "Open printable bill" renders the real PDF through the
 Android print sheet, which drives any printer Android can already see.
 
-**Waiting on the shop owner** (all enterable in Settings — no code change):
+**Nothing is waiting on the shop owner.** Every business detail is settled:
 
-- **Invoice numbering — the format.** The owner is deciding between keeping
-  plain sequential numbering (151, 152, …) and moving to the structured format
-  (`MPE/2026-27/0151`). Both are supported today: plain sequential is format
-  `{SEQ:1}` with reset `never`; the structured one is `MPE/{FY}/{SEQ}` with a
-  financial-year reset. **The starting number is settled at 151** — the previous
-  paper system reached 150 — but is deliberately not set until the format is
-  confirmed, at the owner's instruction. Any bill raised before it is set keeps
-  its number permanently.
-- **The shop's pincode**, and the **bank details** if they are to print on the
-  bill. Everything else is confirmed: name, GSTIN, state, address, phone and
-  email.
+- **Invoice numbering is `MPE/{FY}/{SEQ}` with a financial-year reset, starting
+  at 151** — the paper book reached 150. Set in `constants/business.ts`. The
+  starting number only applies to a database that has never held a bill; after
+  any bill exists the stored counter takes over, so a phone used for testing
+  needs "Reset shop data" before real billing begins.
+- **Pincode `450331`.** Name, GSTIN, state, address, phone and email were
+  already confirmed.
+- **Bank details are not wanted** on the bill footer, by the owner's decision.
+  Those fields stay as placeholders and print as blank gaps.
 
 ---
 
@@ -107,6 +109,8 @@ Android print sheet, which drives any printer Android can already see.
 - [x] **T5.8** — Add Edit and Delete to a bill, from the bill screen and from History. Editing reopens it in the billing flow — items, quantities, amounts and units — keeping the original invoice number and date, recalculating GST and totals on save, adjusting stock by the difference, and keeping the replaced version in an internal edit history. Deleting removes it from History and the totals, asking each time whether the items should go back into stock. *(Added after Phase 7 began, at the owner's request. Migration 008; deletion is soft so the invoice number stays consumed and can never be reissued.)*
 
 - [x] **T5.9** — Add Edit and Delete for quotations, from the quotation screen and from the Quotes list, mirroring T5.8. Editing keeps the Q-number, recalculates totals and keeps the replaced version; a converted quotation stays editable and its bill is untouched, with a note on screen naming that bill. Deleting removes the quotation outright — no stock question, since a quotation never moves any — and frees its Q-number if it was the most recently issued. *(Added after Phase 7 began, at the owner's request. Migration 009; deletion is real rather than soft, because the reference has to be reusable and `reference_number` is UNIQUE — the opposite conclusion to a bill's, from the same principle.)*
+
+- [x] **T5.10** — Make the Paid/Not Paid tag tappable to toggle status, on History and on the Dashboard's recent bills. One tap, updated in place, no confirmation — it is reversible by tapping again. The tag carries a small icon and a press state so it does not look like the read-only Cash/Credit tag beside it, and it is a nested control so tapping it does not also open the bill. The bill screen's copy stays read-only. *(Added after Phase 7 began, at the owner's request. Extends T5.6; no schema change.)*
 
 ## Phase 6 — Backup & Restore
 

@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
@@ -18,6 +19,12 @@ import { isPaymentType, paidStateFrom, type PaidState } from '@/lib/payment';
  * Not Paid is amber rather than red. An unpaid credit bill is ordinary business
  * to be chased, not a fault; red is reserved for things that are wrong, like
  * oversold stock.
+ *
+ * Where the status tag can be tapped it has to LOOK tappable, or it reads as
+ * decoration sitting beside a genuinely read-only type tag. Two things say so:
+ * a small arrows icon inside the pill, and a press state. The icon is the part
+ * that works before anyone touches it — a press state is only discoverable by
+ * pressing, which is no help to someone wondering whether they may.
  */
 
 const PAID_COLOURS: Record<Exclude<PaidState, 'unknown'>, string> = {
@@ -29,9 +36,10 @@ type Props = {
   paymentType: string | null;
   paid: number | null;
   /**
-   * Makes the status tag tappable. Omit it and the tags are read-only, which is
-   * what the Dashboard wants — that screen is for glancing at, and a toggle
-   * under the thumb there would get hit while scrolling.
+   * Makes the status tag tappable. Omitted where the tags are only being read —
+   * the bill screen, where a bill opened on its own is being looked at rather
+   * than processed. History and the Dashboard both pass it, because both are
+   * lists the owner works through with payments in hand.
    */
   onTogglePaid?: (next: boolean) => void;
   /** Set while a toggle is being written, so it cannot be tapped twice. */
@@ -89,18 +97,36 @@ function PaidTag({
   // being classified at all is nearly always one that has since been settled.
   const next = state !== 'paid';
 
-  const body =
+  const interactive = Boolean(onToggle);
+
+  const body = (pressed: boolean) =>
     state === 'unknown' ? (
-      <View style={[styles.tag, styles.tagOutline, busy && styles.tagBusy]}>
+      <View
+        style={[
+          styles.tag,
+          styles.tagOutline,
+          busy && styles.tagBusy,
+          pressed && styles.tagPressed,
+        ]}>
         <Text style={[styles.tagText, styles.tagOutlineText]}>{label}</Text>
+        {interactive ? (
+          <Ionicons name="swap-horizontal" size={11} color={Colors.textMuted} />
+        ) : null}
       </View>
     ) : (
-      <View style={[styles.tag, { backgroundColor: PAID_COLOURS[state] }, busy && styles.tagBusy]}>
+      <View
+        style={[
+          styles.tag,
+          { backgroundColor: PAID_COLOURS[state] },
+          busy && styles.tagBusy,
+          pressed && styles.tagPressed,
+        ]}>
         <Text style={styles.tagText}>{label}</Text>
+        {interactive ? <Ionicons name="swap-horizontal" size={11} color="#FFFFFF" /> : null}
       </View>
     );
 
-  if (!onToggle) return body;
+  if (!onToggle) return body(false);
 
   return (
     <Pressable
@@ -116,7 +142,7 @@ function PaidTag({
             ? 'Not paid. Tap to mark this bill as paid.'
             : 'Payment not recorded. Tap to mark this bill as paid.'
       }>
-      {body}
+      {({ pressed }) => body(pressed)}
     </Pressable>
   );
 }
@@ -124,11 +150,17 @@ function PaidTag({
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.xs, flexWrap: 'wrap' },
   tag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     borderRadius: 999,
     paddingVertical: 3,
     paddingHorizontal: Spacing.sm,
     alignSelf: 'flex-start',
   },
+  // Dimmed and slightly inset, so a tap reads as a press rather than as the
+  // tag having changed to some third state.
+  tagPressed: { opacity: 0.65 },
   tagOutline: {
     backgroundColor: 'transparent',
     borderWidth: 1,
