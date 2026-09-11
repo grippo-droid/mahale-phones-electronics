@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import { isPaymentType, paidStateFrom, type PaidState } from '@/lib/payment';
+import { isPaymentType, type PaidState } from '@/lib/payment';
 
 /**
  * The payment tags on a bill row (T5.6).
@@ -29,26 +29,26 @@ import { isPaymentType, paidStateFrom, type PaidState } from '@/lib/payment';
 
 const PAID_COLOURS: Record<Exclude<PaidState, 'unknown'>, string> = {
   paid: Colors.inStock,
+  partial: Colors.lowStock,
   unpaid: Colors.lowStock,
 };
 
 type Props = {
   paymentType: string | null;
-  paid: number | null;
+  /** Computed from the bill's ledger, never stored — see `lib/payment.ts`. */
+  state: PaidState;
   /**
    * Makes the status tag tappable. Omitted where the tags are only being read —
    * the bill screen, where a bill opened on its own is being looked at rather
    * than processed. History and the Dashboard both pass it, because both are
    * lists the owner works through with payments in hand.
    */
-  onTogglePaid?: (next: boolean) => void;
+  onTogglePaid?: () => void;
   /** Set while a toggle is being written, so it cannot be tapped twice. */
   busy?: boolean;
 };
 
-export default function PaymentTags({ paymentType, paid, onTogglePaid, busy }: Props) {
-  const state = paidStateFrom(paid);
-
+export default function PaymentTags({ paymentType, state, onTogglePaid, busy }: Props) {
   // A bill from before this feature existed has neither. Rendering nothing at
   // all is the honest option — see the note on the unknown status below.
   if (!isPaymentType(paymentType) && state === 'unknown' && !onTogglePaid) return null;
@@ -87,15 +87,19 @@ function PaidTag({
   busy,
 }: {
   state: PaidState;
-  onToggle?: (next: boolean) => void;
+  onToggle?: () => void;
   busy?: boolean;
 }) {
   if (state === 'unknown' && !onToggle) return null;
 
-  const label = state === 'paid' ? 'Paid' : state === 'unpaid' ? 'Not Paid' : 'Not recorded';
-  // From "not recorded", the useful first move is marking it paid: an old bill
-  // being classified at all is nearly always one that has since been settled.
-  const next = state !== 'paid';
+  const label =
+    state === 'paid'
+      ? 'Paid'
+      : state === 'partial'
+        ? 'Part paid'
+        : state === 'unpaid'
+          ? 'Not Paid'
+          : 'Not recorded';
 
   const interactive = Boolean(onToggle);
 
@@ -111,6 +115,23 @@ function PaidTag({
         <Text style={[styles.tagText, styles.tagOutlineText]}>{label}</Text>
         {interactive ? (
           <Ionicons name="swap-horizontal" size={11} color={Colors.textMuted} />
+        ) : null}
+      </View>
+    ) : state === 'partial' ? (
+      // Amber like Not Paid, because some money is still owed and that is the
+      // same kind of thing to chase — but tinted and outlined rather than
+      // filled, so "some of it has arrived" is readable without stopping to
+      // read. Two solid ambers side by side in a list are not tellable apart.
+      <View
+        style={[
+          styles.tag,
+          styles.tagPartial,
+          busy && styles.tagBusy,
+          pressed && styles.tagPressed,
+        ]}>
+        <Text style={[styles.tagText, styles.tagPartialText]}>{label}</Text>
+        {interactive ? (
+          <Ionicons name="swap-horizontal" size={11} color={Colors.lowStock} />
         ) : null}
       </View>
     ) : (
@@ -130,17 +151,19 @@ function PaidTag({
 
   return (
     <Pressable
-      onPress={() => onToggle(next)}
+      onPress={onToggle}
       disabled={busy}
       hitSlop={Spacing.sm}
       accessibilityRole="button"
       accessibilityState={{ disabled: busy }}
       accessibilityLabel={
         state === 'paid'
-          ? 'Paid. Tap to mark this bill as not paid.'
-          : state === 'unpaid'
-            ? 'Not paid. Tap to mark this bill as paid.'
-            : 'Payment not recorded. Tap to mark this bill as paid.'
+          ? 'Paid. Tap to see the payments recorded.'
+          : state === 'partial'
+            ? 'Part paid. Tap to record the rest.'
+            : state === 'unpaid'
+              ? 'Not paid. Tap to record payment in full.'
+              : 'Payment not recorded. Tap to record payment in full.'
       }>
       {({ pressed }) => body(pressed)}
     </Pressable>
@@ -168,6 +191,13 @@ const styles = StyleSheet.create({
     // Matches the filled pills' height despite the border taking a pixel.
     paddingVertical: 2,
   },
+  tagPartial: {
+    backgroundColor: Colors.lowStockTint,
+    borderWidth: 1,
+    borderColor: Colors.lowStock,
+    paddingVertical: 2,
+  },
+  tagPartialText: { color: Colors.lowStock },
   tagBusy: { opacity: 0.5 },
   tagText: { color: '#FFFFFF', fontSize: FontSizes.small - 2, fontWeight: '700' },
   tagOutlineText: { color: Colors.textMuted },

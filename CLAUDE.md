@@ -782,6 +782,77 @@ says nothing about them:
   positive back to NULL. `bill_items.product_id` is a foreign key: the stand-in
   must never reach it, and NULL is already what "no product behind this line"
   means there — it is also what stops `createBill` reducing stock that is gone.
+- **Settlement is a LEDGER, not a flag** (`bill_payments`, migration 010).
+  One row per payment received, and the status is COMPUTED from those rows —
+  `unknown` / `unpaid` / `partial` / `paid`. A customer paying half now and half
+  next week is ordinary, and `bills.paid` had two states for a situation with
+  three. Nothing stores the status: a stored copy would be free to disagree with
+  the rows the moment an entry is edited or deleted, the same reason
+  `converted_bill_id` is the only record of a conversion.
+- **`bills.paid` is left in place and no longer read.** Not a second source of
+  truth once nothing consults it, and keeping the column means an older backup
+  restores into this schema unchanged and is then migrated forward by exactly
+  migration 010.
+- **`bill_payments.paid_on` is NULLABLE, and that nullability is the whole of
+  what the migration knows.** A bill already marked paid recorded a real fact:
+  settled, in full. The AMOUNT is therefore knowable — the grand total — but the
+  DATE was never recorded anywhere, and inventing one would print a date on a
+  customer's reprinted invoice that nobody ever entered. NULL means "recorded
+  before the ledger existed"; the ledger shows "Date not recorded" and the PDF
+  leaves that column empty. Nothing is backfilled for `paid = 0` or NULL — NULL
+  has always meant "never recorded" here, and a zero-payment ledger would be the
+  same invention in the other direction. Two negative controls cover both.
+- **Every comparison is in whole paise, as integers** (`toPaise`, `sumPaise`).
+  Money is REAL, and summing REALs does not land where arithmetic says: a ₹648
+  bill settled with ₹512.17 + ₹135.83 comes out strictly BELOW ₹648 and reads
+  "Part paid" for ever, a ten-thousandth of a paisa short, with nothing on
+  screen to explain it and no way for the owner to clear it.
+
+  Worth knowing how that test nearly shipped vacuous: the first version used
+  `0.1 + 0.2` and thirds of 1000, and a negative control removing the rounding
+  still passed — those cases happen to err UPWARD. A float example is not
+  automatically a float test; the case has to be one that actually lands short.
+- **Every write to the ledger clears `bills.pdf_path`, inside the repository.**
+  From T9.3 the stored file prints the payments, so one left on disk would be
+  found by `existingBillPdf` and reshared — a document disagreeing with the
+  shop's record under the same invoice number, which is the one thing
+  `lib/pdf.ts` exists to prevent. It is in `db/payments.ts` rather than at the
+  call sites because there are four ways to change a ledger (record, edit,
+  delete, the one-tap shortcut) and a rule remembered at four call sites is one
+  that will be missed at one. The repository returns the invoice number; the
+  CALLER deletes the file, because the repository has no business touching the
+  filesystem.
+- **The one-tap tag only ever moves a bill TOWARDS settled.** It records one
+  entry for whatever is still owed. There is no un-pay: that would mean deleting
+  payment rows, and there is no honest answer to which of several instalments a
+  stray tap should remove. On a settled bill the tap opens the ledger instead,
+  which is what someone tapping a Paid tag actually wants. `tagTapAction` is a
+  function rather than a branch in a handler so it is reachable from a test.
+- **Cash opens its ledger with one full-amount entry; credit opens empty.** That
+  is the old convenience preserved — a cash sale is money in hand and needs no
+  second action — and it is only a starting point, fully editable. Driven by
+  `input.paid`, NOT by the payment type, because the type merely supplies that
+  flag's default and the owner can override it before saving. A NULL `paid`
+  writes nothing: an empty ledger is exactly "nothing recorded". Written inside
+  `createBill`'s own transaction, like the invoice number.
+- **"Part paid" is amber like "Not Paid", but tinted and outlined rather than
+  filled.** Some money is still owed, so it belongs to the same family — red
+  stays for things that are wrong. Two SOLID ambers side by side in a list are
+  not tellable apart, which is why the fill differs. Grey outline remains "Not
+  recorded".
+- **A new table has to be added to the backup manifest counts**
+  (`BackupCounts.billPayments`), OPTIONAL and guarded with `!== undefined` in
+  the verification, exactly as `quotations` is. Miss the count and the restore
+  silently stops verifying that table; make it required and every older backup
+  fails the verify step, because "absent" is not "none".
+- **The ledger is per bill and survives a soft delete.** Anything that ever sums
+  what the shop has COLLECTED must exclude deleted bills the way
+  `getSalesSummary` already does — the ledger rows themselves carry no such
+  filter.
+- **Editing a bill can move `grand_total` under a fixed ledger** and flip its
+  status without anyone touching a payment. That is correct: the status is a
+  fact about the two figures. `bill_edits` snapshots deliberately do NOT include
+  payments — what was received is not part of what was billed.
 - **Payment is two fields, not one: how the sale was agreed, and where the
   money is.** `bills.payment_type` ('Cash' | 'Credit') and `bills.paid`
   (1/0/NULL), migration 006. A credit bill gets paid a fortnight later without

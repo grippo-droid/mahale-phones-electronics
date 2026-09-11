@@ -190,6 +190,31 @@ export async function createBill(
 
     // Last, so it sees a bill that is fully written. Still inside the
     // transaction, so anything it throws takes the bill with it.
+    /**
+     * A bill saved as paid opens its ledger with one entry for the full
+     * amount, written in this same transaction (T9.2).
+     *
+     * This is what preserves the old convenience: a cash sale is money in
+     * hand, so it starts settled and needs no second action. It is only a
+     * starting point — the owner can reduce or remove the entry if the
+     * customer in fact paid part.
+     *
+     * Driven by `input.paid` rather than by the payment type, because the type
+     * only supplies that flag's default and the owner can override it before
+     * saving. A NULL `paid` writes nothing at all: it means nothing was
+     * recorded, and an empty ledger is exactly that.
+     */
+    if (input.paid === true && input.grand_total > 0) {
+      await txn.runAsync(
+        `INSERT INTO bill_payments (bill_id, amount, paid_on, created_at)
+         VALUES (?, ?, ?, ?)`,
+        billId,
+        input.grand_total,
+        date.slice(0, 10),
+        now
+      );
+    }
+
     if (input.afterInsert) await input.afterInsert(txn, billId);
   });
 

@@ -484,6 +484,63 @@ const migration009: Migration = {
   },
 };
 
+const migration010: Migration = {
+  version: 10,
+  name: 'bill_payments',
+  up: async (db) => {
+    // A bill is settled by a LEDGER of payments, not by a flag. A customer
+    // paying half now and half next week is ordinary, and `bills.paid` could
+    // not say so — it had two states for a situation with three.
+    //
+    // `paid_on` is NULLABLE, and that is the whole of what this migration knows
+    // and does not know. A bill already marked paid records a real fact the
+    // owner entered: it was settled, in full. The AMOUNT is therefore knowable
+    // (the grand total) but the DATE was never recorded anywhere, and inventing
+    // one would put a date on a customer's reprinted invoice that nobody ever
+    // entered. NULL means "recorded before this ledger existed"; the PDF prints
+    // the amount for those rows and leaves the date column empty.
+    //
+    // Nothing is backfilled for `paid = 0` or `paid IS NULL`. NULL has always
+    // meant "never recorded" here, and turning it into a zero-payment ledger
+    // would be the same invention in the other direction.
+    //
+    // `bills.paid` is deliberately left in place and stops being read. It is
+    // not a second source of truth once nothing consults it, and keeping the
+    // column means an older backup restores into this schema unchanged and is
+    // then migrated forward by exactly this step.
+    await db.execAsync(`
+      CREATE TABLE bill_payments (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        bill_id    INTEGER NOT NULL REFERENCES bills (id) ON DELETE CASCADE,
+        /* Rupees. Stored as REAL like every other money column here, but
+           compared in whole paise -- see lib/payment.ts. */
+        amount     REAL    NOT NULL,
+        /* ISO date. NULL only for rows this migration created. */
+        paid_on    TEXT,
+        note       TEXT,
+        created_at TEXT    NOT NULL,
+        /* NULL until the entry is first corrected, so "never touched" and
+           "edited back to the same figure" stay distinguishable -- the same
+           reason bills.edited_at is nullable. */
+        edited_at  TEXT
+      );
+
+      CREATE INDEX idx_bill_payments_bill_id ON bill_payments (bill_id);
+    `);
+
+    // The backfill. One full-amount entry per bill the owner had already
+    // marked paid, carrying no date.
+    await db.runAsync(
+      `INSERT INTO bill_payments (bill_id, amount, paid_on, note, created_at)
+       SELECT id, grand_total, NULL, ?, ?
+         FROM bills
+        WHERE paid = 1`,
+      'Marked paid before payments were itemised',
+      new Date().toISOString()
+    );
+  },
+};
+
 /**
  * Every migration ever shipped, in order. Append only.
  */
@@ -497,6 +554,7 @@ export const MIGRATIONS: Migration[] = [
   migration007,
   migration008,
   migration009,
+  migration010,
 ];
 
 /** The schema version the current build of the app expects. */

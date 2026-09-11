@@ -13,8 +13,10 @@ import {
 
 import ErrorBanner from '@/components/ErrorBanner';
 import PaymentTags from '@/components/PaymentTags';
+import { useBillPayments } from '@/components/useBillPayments';
+import type { PaidState } from '@/lib/payment';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import { getRecentBills, getSalesSummary, setBillPaid } from '@/db/bills';
+import { getRecentBills, getSalesSummary } from '@/db/bills';
 import type { BillRow } from '@/db/schema';
 import { countLowStockProducts, countProducts } from '@/db/products';
 import { getLastBackupAt } from '@/db/settings';
@@ -61,7 +63,7 @@ export default function DashboardScreen() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<BillRow[]>([]);
   /** Bill ids with a paid/not-paid write in flight, so a tag cannot be double-tapped. */
-  const [savingPaid, setSavingPaid] = useState<Set<number>>(new Set());
+  const { loadFor, stateFor, tapTag, settling } = useBillPayments();
   const [paidError, setPaidError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -82,34 +84,10 @@ export default function DashboardScreen() {
    * billed, not what has been collected, so a bill changing hands does not
    * change it.
    */
-  const togglePaid = useCallback(async (bill: BillRow, next: boolean) => {
-    const previous = bill.paid;
-
-    setPaidError(null);
-    setSavingPaid((current) => new Set(current).add(bill.id));
-    setRecent((current) =>
-      current.map((row) => (row.id === bill.id ? { ...row, paid: next ? 1 : 0 } : row))
-    );
-
-    try {
-      await setBillPaid(bill.id, next);
-    } catch (err) {
-      setRecent((current) =>
-        current.map((row) => (row.id === bill.id ? { ...row, paid: previous } : row))
-      );
-      setPaidError(
-        `${bill.invoice_number} could not be updated, so it is unchanged. ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      );
-    } finally {
-      setSavingPaid((current) => {
-        const remaining = new Set(current);
-        remaining.delete(bill.id);
-        return remaining;
-      });
-    }
-  }, []);
+  const tapPaidTag = useCallback(
+    (bill: BillRow) => tapTag(bill, setPaidError),
+    [tapTag]
+  );
 
   const load = useCallback(async () => {
     try {
@@ -138,6 +116,9 @@ export default function DashboardScreen() {
         hasData: productCount > 0 || recentBills.length > 0,
       });
       setRecent(recentBills);
+      // The status tag on each row is computed from its ledger, so the
+      // ledgers are fetched for the whole page in one query.
+      await loadFor(recentBills.map((row) => row.id));
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -145,7 +126,7 @@ export default function DashboardScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [loadFor]);
 
   // Re-read whenever the tab comes into view — the figures move every time a
   // bill is generated or stock is adjusted on another tab.
@@ -298,8 +279,9 @@ export default function DashboardScreen() {
             <RecentBillRow
               key={row.id}
               bill={row}
-              onTogglePaid={togglePaid}
-              busy={savingPaid.has(row.id)}
+              onTogglePaid={tapPaidTag}
+              state={stateFor(row.id, row.grand_total)}
+              busy={settling.has(row.id)}
             />
           ))
         )}
@@ -316,10 +298,12 @@ export default function DashboardScreen() {
 function RecentBillRow({
   bill,
   onTogglePaid,
+  state,
   busy,
 }: {
   bill: BillRow;
-  onTogglePaid: (bill: BillRow, next: boolean) => void;
+  onTogglePaid: (bill: BillRow) => void;
+  state: PaidState;
   busy: boolean;
 }) {
   return (
@@ -341,8 +325,8 @@ function RecentBillRow({
             History's overflow button. */}
         <PaymentTags
           paymentType={bill.payment_type}
-          paid={bill.paid}
-          onTogglePaid={(next) => onTogglePaid(bill, next)}
+          state={state}
+          onTogglePaid={() => onTogglePaid(bill)}
           busy={busy}
         />
       </View>

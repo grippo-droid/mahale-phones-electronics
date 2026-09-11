@@ -77,6 +77,13 @@ export type BackupCounts = {
    * failed for a count the file could not have carried.
    */
   quotations?: number;
+  /**
+   * Added with the payment ledger (schema 10), and optional for the same
+   * reason as `quotations` above: a backup written before it exists carries no
+   * such figure, and "absent" must not be read as "none" or every older file
+   * would fail this step.
+   */
+  billPayments?: number;
 };
 
 export type BackupManifest = {
@@ -549,14 +556,15 @@ export async function previewRestore(
 }
 
 async function countAllRows(db: SQLiteDatabase): Promise<BackupCounts> {
-  const [products, bills, billItems, settings, quotations] = await Promise.all([
+  const [products, bills, billItems, settings, quotations, billPayments] = await Promise.all([
     countRows(db, 'products'),
     countRows(db, 'bills'),
     countRows(db, 'bill_items'),
     countRows(db, 'app_settings'),
     countRows(db, 'quotations'),
+    countRows(db, 'bill_payments'),
   ]);
-  return { products, bills, billItems, settings, quotations };
+  return { products, bills, billItems, settings, quotations, billPayments };
 }
 
 export type RestoreOutcome =
@@ -675,7 +683,9 @@ export async function performRestore(
       // quotations existed says nothing about them, and "nothing" must not be
       // read as "none" — that would fail every older backup on this step.
       (manifest.counts.quotations !== undefined &&
-        after.quotations !== manifest.counts.quotations)
+        after.quotations !== manifest.counts.quotations) ||
+      (manifest.counts.billPayments !== undefined &&
+        after.billPayments !== manifest.counts.billPayments)
     ) {
       throw new RestoreFailedError('mismatch', 'verify');
     }

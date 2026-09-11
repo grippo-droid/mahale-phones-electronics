@@ -16,13 +16,24 @@ import {
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { stateCodeFor } from '@/constants/states';
 import { getBillById, setBillPdfPath, type BillWithItems } from '@/db/bills';
+import {
+  deletePayment,
+  editPayment,
+  listPayments,
+  recordPayment,
+  totalsFor,
+  type BillPayment,
+  type NewPayment,
+} from '@/db/payments';
 import { formatDate, formatRupees } from '@/lib/format';
 import { rupeesInWords } from '@/lib/numberToWords';
 import { formatQuantityWithUnit } from '@/lib/units';
 import PaymentTags from '@/components/PaymentTags';
+import PaymentLedger from '@/components/PaymentLedger';
 import { confirmDeleteBill, startEditingBill } from '@/lib/billActions';
 import {
   buildBillHtml,
+  deleteBillPdf,
   existingBillPdf,
   generateBillPdf,
   isInterStateBill,
@@ -70,6 +81,8 @@ export default function BillResultScreen() {
   const [sharing, setSharing] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [payments, setPayments] = useState<BillPayment[]>([]);
+  const [savingPayment, setSavingPayment] = useState(false);
 
   const billId = Number.parseInt(id ?? '', 10);
 
@@ -87,11 +100,13 @@ export default function BillResultScreen() {
     let cancelled = false;
 
     getBillById(billId)
-      .then((found) => {
+      .then(async (found) => {
         if (cancelled) return;
         if (!found) setError('That bill could not be found.');
         setBill(found);
-        setLoading(false);
+        // The ledger decides the status tag and, from T9.3, what prints.
+        if (found) setPayments(await listPayments(found.id).catch(() => []));
+        if (!cancelled) setLoading(false);
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -103,6 +118,66 @@ export default function BillResultScreen() {
       cancelled = true;
     };
   }, [billId, validId]);
+
+  /**
+   * Re-reads the ledger after any change to it.
+   *
+   * The repository clears `bills.pdf_path` on every write, because from T9.3
+   * the stored file prints the payments and would otherwise be reshared showing
+   * an older ledger under the same invoice number. Deleting the file itself is
+   * the caller's job — the repository has no business touching the filesystem.
+   */
+  const afterPaymentWrite = useCallback(
+    async (staleInvoiceNumber: string | null) => {
+      if (staleInvoiceNumber) deleteBillPdf(staleInvoiceNumber);
+      if (!bill) return;
+      setBill((current) => (current ? { ...current, pdf_path: null } : current));
+      setPayments(await listPayments(bill.id));
+    },
+    [bill]
+  );
+
+  const handleRecord = useCallback(
+    async (payment: NewPayment) => {
+      if (!bill) return;
+      setSavingPayment(true);
+      try {
+        const { staleInvoiceNumber } = await recordPayment(bill.id, payment);
+        await afterPaymentWrite(staleInvoiceNumber);
+      } finally {
+        setSavingPayment(false);
+      }
+    },
+    [bill, afterPaymentWrite]
+  );
+
+  const handleEditPayment = useCallback(
+    async (paymentId: number, payment: NewPayment) => {
+      setSavingPayment(true);
+      try {
+        const { staleInvoiceNumber } = await editPayment(paymentId, payment);
+        await afterPaymentWrite(staleInvoiceNumber);
+      } finally {
+        setSavingPayment(false);
+      }
+    },
+    [afterPaymentWrite]
+  );
+
+  const handleDeletePayment = useCallback(
+    async (payment: BillPayment) => {
+      setSavingPayment(true);
+      try {
+        const { staleInvoiceNumber } = await deletePayment(payment.id);
+        await afterPaymentWrite(staleInvoiceNumber);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSavingPayment(false);
+      }
+    },
+    [afterPaymentWrite]
+  );
 
   /**
    * Produces the PDF file, reusing one already on disk (T4.4).
@@ -226,11 +301,14 @@ export default function BillResultScreen() {
             </View>
           </View>
 
-          {/* Read-only. Changing the status lives on History, where the owner
-              works through several bills at once; a bill opened on its own is
-              being read, not processed. Shown here all the same, so this screen
-              is not the one place a bill will not say whether it was paid. */}
-          <PaymentTags paymentType={bill.payment_type} paid={bill.paid} />
+          {/* Read-only here: this screen carries the full ledger below, so a
+              one-tap shortcut beside it would be two ways to do the same thing
+              with different amounts. The tag still shows, so no screen displays
+              a bill without saying where the money is. */}
+          <PaymentTags
+            paymentType={bill.payment_type}
+            state={totalsFor(bill.grand_total, payments).state}
+          />
 
           <View style={styles.divider} />
 
@@ -316,6 +394,20 @@ export default function BillResultScreen() {
           </View>
 
           <Text style={styles.words}>{rupeesInWords(bill.grand_total)}</Text>
+        </View>
+
+        {/* Its own card, below the bill rather than inside it. What was billed
+            is fixed; what has been received moves, and the two should not read
+            as one block. */}
+        <View style={styles.card}>
+          <PaymentLedger
+            grandTotal={bill.grand_total}
+            payments={payments}
+            onRecord={handleRecord}
+            onEdit={handleEditPayment}
+            onDelete={handleDeletePayment}
+            busy={savingPayment}
+          />
         </View>
 
         {pdfError ? (

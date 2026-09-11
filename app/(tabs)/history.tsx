@@ -16,9 +16,11 @@ import {
 
 import ErrorBanner from '@/components/ErrorBanner';
 import PaymentTags from '@/components/PaymentTags';
+import { useBillPayments } from '@/components/useBillPayments';
+import type { PaidState } from '@/lib/payment';
 import { confirmDeleteBill, startEditingBill } from '@/lib/billActions';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import { listBills, setBillPaid, summariseBills, type SalesSummary } from '@/db/bills';
+import { listBills, summariseBills, type SalesSummary } from '@/db/bills';
 import type { BillRow } from '@/db/schema';
 import { formatBillDay, formatRupees, formatTime } from '@/lib/format';
 import { describeRange, RANGE_OPTIONS, resolveRange, type RangeKey } from '@/lib/dateRanges';
@@ -75,7 +77,7 @@ export default function HistoryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Bill ids with a paid/not-paid write in flight, so a tag cannot be double-tapped. */
-  const [savingPaid, setSavingPaid] = useState<Set<number>>(new Set());
+  const { loadFor, stateFor, tapTag, settling } = useBillPayments();
 
   /**
    * Guards against an older query landing after a newer one.
@@ -104,6 +106,8 @@ export default function HistoryScreen() {
       if (id !== requestId.current) return; // superseded by a newer query
 
       setBills(rows);
+      // One query for the whole page's ledgers, not one per row.
+      await loadFor(rows.map((row) => row.id));
       setSummary(totals);
       loadedCount.current = rows.length;
       setReachedEnd(rows.length < PAGE_SIZE);
@@ -117,7 +121,7 @@ export default function HistoryScreen() {
         setRefreshing(false);
       }
     }
-  }, [search, range]);
+  }, [search, range, loadFor]);
 
   const loadMore = useCallback(async () => {
     if (loadingMore || reachedEnd || loading) return;
@@ -138,7 +142,14 @@ export default function HistoryScreen() {
       // appending to it now would mix two different searches together.
       if (id !== requestId.current) return;
 
-      setBills((current) => [...current, ...rows]);
+      setBills((current) => {
+        const all = [...current, ...rows];
+        // Every row on screen, not just the new page: loadFor replaces what it
+        // holds rather than merging, so passing only the new ids would drop the
+        // ledgers of everything already loaded and blank their tags.
+        void loadFor(all.map((row) => row.id));
+        return all;
+      });
       loadedCount.current += rows.length;
       if (rows.length < PAGE_SIZE) setReachedEnd(true);
     } catch (err) {
@@ -146,7 +157,7 @@ export default function HistoryScreen() {
     } finally {
       setLoadingMore(false);
     }
-  }, [search, range, loadingMore, reachedEnd, loading]);
+  }, [search, range, loadingMore, reachedEnd, loading, loadFor]);
 
   /**
    * Marks a bill paid or not paid without leaving the list.
@@ -160,34 +171,10 @@ export default function HistoryScreen() {
    * claiming something the database does not agree with. Money is exactly the
    * wrong thing to be optimistic about and then quiet.
    */
-  const togglePaid = useCallback(async (bill: BillRow, next: boolean) => {
-    const previous = bill.paid;
-
-    setError(null);
-    setSavingPaid((current) => new Set(current).add(bill.id));
-    setBills((current) =>
-      current.map((row) => (row.id === bill.id ? { ...row, paid: next ? 1 : 0 } : row))
-    );
-
-    try {
-      await setBillPaid(bill.id, next);
-    } catch (err) {
-      setBills((current) =>
-        current.map((row) => (row.id === bill.id ? { ...row, paid: previous } : row))
-      );
-      setError(
-        `${bill.invoice_number} could not be updated, so it is unchanged. ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      );
-    } finally {
-      setSavingPaid((current) => {
-        const remaining = new Set(current);
-        remaining.delete(bill.id);
-        return remaining;
-      });
-    }
-  }, []);
+  const tapPaidTag = useCallback(
+    (bill: BillRow) => tapTag(bill, setError),
+    [tapTag]
+  );
 
   /**
    * Edit or delete, from the row rather than from inside the bill.
@@ -365,9 +352,10 @@ export default function HistoryScreen() {
           renderItem={({ item }) => (
             <BillRowItem
               bill={item}
-              onTogglePaid={togglePaid}
+              onTogglePaid={tapPaidTag}
+              state={stateFor(item.id, item.grand_total)}
               onShowActions={showActions}
-              busy={savingPaid.has(item.id)}
+              busy={settling.has(item.id)}
             />
           )}
           ListEmptyComponent={
@@ -406,11 +394,13 @@ export default function HistoryScreen() {
 function BillRowItem({
   bill,
   onTogglePaid,
+  state,
   onShowActions,
   busy,
 }: {
   bill: BillRow;
-  onTogglePaid: (bill: BillRow, next: boolean) => void;
+  onTogglePaid: (bill: BillRow) => void;
+  state: PaidState;
   onShowActions: (bill: BillRow) => void;
   busy: boolean;
 }) {
@@ -434,8 +424,8 @@ function BillRowItem({
             navigate. */}
         <PaymentTags
           paymentType={bill.payment_type}
-          paid={bill.paid}
-          onTogglePaid={(next) => onTogglePaid(bill, next)}
+          state={state}
+          onTogglePaid={() => onTogglePaid(bill)}
           busy={busy}
         />
       </View>
