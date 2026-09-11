@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { router, Stack } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { router, Stack, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -67,6 +67,9 @@ export default function NewQuotationScreen() {
   const [showErrors, setShowErrors] = useState(false);
   const [nextReference, setNextReference] = useState<string | null>(null);
 
+  /** Drops a slower earlier search reply when a newer one has been asked for. */
+  const resultsRequestId = useRef(0);
+
   const lines = useQuotationStore(selectQuotationLines);
   const itemCount = useQuotationStore(selectQuotationItemCount);
   const customer = useQuotationStore(selectQuotationCustomer);
@@ -113,34 +116,68 @@ export default function NewQuotationScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    // Nothing to fetch when not browsing. The list below reads `shown`, which
-    // is empty in that case anyway, so there is no stale state to clear here.
+  /**
+   * The product list shown while browsing.
+   *
+   * A callback rather than only an effect body so the focus handler can run it
+   * too — the same gap Billing had: a chip left selected while a product was
+   * added elsewhere showed a list that no longer matched inventory, because
+   * none of the effect's dependencies had changed.
+   *
+   * A request id rather than a per-effect `cancelled` flag, now that two
+   * callers can start one.
+   */
+  const loadResults = useCallback(async () => {
     if (!browsing) return;
 
-    let cancelled = false;
-    (async () => {
-      // Set inside the async work rather than in the effect body: it belongs to
-      // the fetch, and updating state synchronously as an effect runs is the
-      // cascading-render pattern React warns about.
-      setSearching(true);
-      try {
-        const rows = await listProducts({
-          search: hasSearchTerm ? debouncedSearch : undefined,
-          category: hasCategory ? category : undefined,
-          limit: SEARCH_RESULT_LIMIT,
-        });
-        if (!cancelled) setResults(rows);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        if (!cancelled) setSearching(false);
+    const id = ++resultsRequestId.current;
+    setSearching(true);
+    try {
+      const rows = await listProducts({
+        search: hasSearchTerm ? debouncedSearch : undefined,
+        category: hasCategory ? category : undefined,
+        limit: SEARCH_RESULT_LIMIT,
+      });
+      if (id === resultsRequestId.current) setResults(rows);
+    } catch (err) {
+      if (id === resultsRequestId.current) {
+        setError(err instanceof Error ? err.message : String(err));
       }
+    } finally {
+      if (id === resultsRequestId.current) setSearching(false);
+    }
+  }, [browsing, hasSearchTerm, hasCategory, debouncedSearch, category]);
+
+  // Called a microtask later rather than straight from the effect body: the
+  // first thing loadResults does is show the spinner, and a synchronous state
+  // write while an effect runs is the cascading-render pattern React warns
+  // about. A microtask is imperceptible and keeps the effect body clean.
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      await Promise.resolve();
+      if (active) await loadResults();
     })();
     return () => {
-      cancelled = true;
+      active = false;
     };
-  }, [browsing, hasSearchTerm, hasCategory, debouncedSearch, category]);
+  }, [loadResults]);
+
+  /**
+   * Also on focus, so returning from anywhere that could have changed the
+   * catalogue re-reads it. The chip list is refreshed with it: a product saved
+   * under a category not previously in use adds a chip.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      loadResults();
+      listUsedCategories()
+        .then(setUsedCategories)
+        .catch(() => {
+          // The fixed list still renders without this.
+        });
+    }, [loadResults])
+  );
 
   // Derived rather than cleared in the effect above: "not browsing" always
   // means "no results", so it does not need to be a separate piece of state

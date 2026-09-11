@@ -1,6 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -109,6 +109,9 @@ export default function BillingScreen() {
   /** Live stock by product id, refreshed from the database — never from the cart. */
   const [stockById, setStockById] = useState<Record<number, number>>({});
 
+  /** Drops a slower earlier search reply when a newer one has been asked for. */
+  const resultsRequestId = useRef(0);
+
   const lines = useCartStore(selectLines);
   const itemCount = useCartStore(selectItemCount);
   const customer = useCartStore(selectCustomer);
@@ -196,42 +199,66 @@ export default function BillingScreen() {
     return () => clearTimeout(timer);
   }, [searchInput]);
 
-  // Product search.
-  useEffect(() => {
-    let cancelled = false;
+  /**
+   * The product list shown while browsing.
+   *
+   * Pulled out of the effect so the focus handler can run it too. It used to
+   * live only in an effect keyed on the search term and the chip, which meant
+   * leaving this tab to add a product and coming back with the same chip still
+   * selected showed a list that no longer matched inventory — nothing had
+   * changed in the dependencies, so nothing re-queried.
+   *
+   * Guarded by a request id rather than a per-effect `cancelled` flag, because
+   * there are now two callers and a slower earlier reply must not overwrite a
+   * newer one. Same guard as History's.
+   */
+  const loadResults = useCallback(async () => {
+    if (!browsing) return;
 
-    if (!browsing) {
-      setResults([]);
-      return;
-    }
-
+    const id = ++resultsRequestId.current;
     setSearching(true);
-    listProducts({
-      search: debouncedSearch,
-      category: hasCategory ? category : null,
-      limit: SEARCH_RESULT_LIMIT,
-    })
-      .then((rows) => {
-        if (cancelled) return;
-        setResults(rows);
-        // Search results carry fresh stock, so fold them into the map too.
-        setStockById((current) => ({
-          ...current,
-          ...Object.fromEntries(rows.map((row) => [row.id, row.stock_qty])),
-        }));
-        setError(null);
-      })
-      .catch((err: Error) => {
-        if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setSearching(false);
-      });
 
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const rows = await listProducts({
+        search: debouncedSearch,
+        category: hasCategory ? category : null,
+        limit: SEARCH_RESULT_LIMIT,
+      });
+      if (id !== resultsRequestId.current) return;
+
+      setResults(rows);
+      // Search results carry fresh stock, so fold them into the map too.
+      setStockById((current) => ({
+        ...current,
+        ...Object.fromEntries(rows.map((row) => [row.id, row.stock_qty])),
+      }));
+      setError(null);
+    } catch (err) {
+      if (id === resultsRequestId.current) {
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      if (id === resultsRequestId.current) setSearching(false);
+    }
   }, [debouncedSearch, browsing, hasCategory, category]);
+
+  // No clearing when browsing stops: `showResults` already requires `browsing`,
+  // so a stale list is never on screen, and the next browse overwrites it
+  // before it could be.
+  // Called a microtask later rather than straight from the effect body: the
+  // first thing loadResults does is show the spinner, and a synchronous state
+  // write while an effect runs is the cascading-render pattern React warns
+  // about. A microtask is imperceptible and keeps the effect body clean.
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      await Promise.resolve();
+      if (active) await loadResults();
+    })();
+    return () => {
+      active = false;
+    };
+  }, [loadResults]);
 
   const refreshStock = useCallback(async () => {
     const ids = useCartStore.getState().lines.map((line) => line.productId);
@@ -263,13 +290,15 @@ export default function BillingScreen() {
     useCallback(() => {
       refreshStock();
       loadQuickPick();
+      // Only does anything while a chip or a search is active; see loadResults.
+      loadResults();
       listUsedCategories()
         .then(setUsedCategories)
         .catch(() => {
           // The fixed list still renders without this; an unreachable orphan
           // category is not worth an error message over the bill.
         });
-    }, [refreshStock, loadQuickPick])
+    }, [refreshStock, loadQuickPick, loadResults])
   );
 
   const inCart = useMemo(

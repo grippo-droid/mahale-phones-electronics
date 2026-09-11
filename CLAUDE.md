@@ -504,6 +504,21 @@ says nothing about them:
   copies drifted exactly as expected: the T3.8 layout fix landed on Billing and
   left Inventory's last chip clipped. Sharing the rule without sharing the
   rendering was half a job.
+- **Every screen with category chips re-queries its product list on focus.**
+  Billing and the quotation editor originally keyed that query only on the chip
+  and the search term, so leaving with a chip selected, adding a product, and
+  coming back re-queried nothing — none of the dependencies had changed, and the
+  list quietly no longer matched inventory. Inventory already reloaded on focus
+  and does not have the bug. The query is now a callback both the effect and the
+  focus handler call, guarded by a request id so a slower earlier reply cannot
+  overwrite a newer one.
+- **A newly added product appears in ALPHABETICAL position, not at the top.**
+  `listProducts` orders by name, so under "All" with thirty-odd products a new
+  one lands mid-list and off-screen, while under its own category chip the list
+  is short enough that it is visible. That looks exactly like a stale list and
+  is not one — the header count moves immediately. Worth remembering before
+  chasing a cache that does not exist. What it argues for is the save
+  confirmation in T7.3, not a refetch change.
 - **On Billing, a category chip and a typed search both mean "browsing".** They
   combine in the query, and one control (`backToBill`) clears both. Leaving the
   user to work out that two separate things need clearing to see the bill again
