@@ -503,6 +503,39 @@ confirmation of the shop's existing signage/branding.
   AND the date range, and the cost stays tied to the window. Measured flat at
   ~2 ms from 2,300 to 689,000 rows. The T7.5 guard now asserts the **date bound
   drives**, not an index name — a name check would have passed on the bad index.
+- **A converted quotation is still editable, and editing it never touches the
+  bill** (migration 009). From the moment a bill exists the two are separate
+  documents: the bill records a sale that happened, the quotation is the offer
+  that led to it. Correcting a typo on the offer must not reach into a tax
+  record, and refusing to correct it would leave the offer permanently wrong.
+  The quotation screen names the bill it became and says the change will not
+  follow, so the split is visible rather than surprising. The UPDATE
+  deliberately omits `converted_bill_id` — a negative control clears it and the
+  suite catches that the quotation would become convertible a second time.
+- **Deleting a quotation is a REAL delete, the opposite of a bill's.** An
+  invoice number must stay consumed forever, so a bill's row survives; a
+  quotation reference is meant to be reusable and `reference_number` is UNIQUE,
+  so the row has to go for the number to come back. That is not an
+  inconsistency between the two — it is the same principle (the number decides)
+  reaching opposite conclusions, because a quotation is an offer and not a tax
+  record.
+- **Only a TRAILING quotation reference is reclaimed.** After a delete the
+  counter is set to the highest reference still in use, so deleting the newest
+  frees its number while deleting an older one leaves that gap. Deleting a run
+  out of order still reclaims the whole run, because the counter is recomputed
+  rather than decremented. Reusing an arbitrary gap was rejected: numbers would
+  be issued out of order so a reference would stop implying age, and a reissued
+  Q-0003 could collide with a Q-0003 PDF a different customer is still holding.
+  The just-issued number is the one least likely to have been sent anywhere.
+  With nothing left at all the counter row is deleted, so the series restarts
+  at Q-0001.
+- **`substr(reference_number, 3)` is safe to parse because
+  `renderQuotationNumber` is the only thing that ever writes a reference.**
+  `Q-` is two characters, so the rest is exactly the digits it wrote.
+- **Deleting a quotation asks only for confirmation, never about stock.** A
+  quotation never moved any — that is the whole point of it. Where a bill's
+  delete has a real question to put, this one has nothing to ask, so it is two
+  buttons rather than three.
 - **A quotation is its own table, not a flag on `bills`** (migration 007). It
   takes no invoice number and must never advance that counter — ten quotations
   and no sales has to leave the invoice series untouched. It moves no stock. It

@@ -21,7 +21,9 @@ import {
   QUOTATION_STALE_DAYS,
   type QuotationWithItems,
 } from '@/db/quotations';
+import { getBillById, type BillWithItems } from '@/db/bills';
 import { formatDate, formatRupees } from '@/lib/format';
+import { confirmDeleteQuotation, startEditingQuotation } from '@/lib/quotationActions';
 import { quotationToCartLines } from '@/lib/quotationDraft';
 import { existingQuotationPdf, generateQuotationPdf } from '@/lib/quotationPdf';
 import { formatQuantityWithUnit } from '@/lib/units';
@@ -47,6 +49,8 @@ export default function QuotationScreen() {
   const [quotation, setQuotation] = useState<QuotationWithItems | null>(null);
   const [loading, setLoading] = useState(true);
   const [sharing, setSharing] = useState(false);
+  /** The bill this became, so the note can name it rather than just say "a bill". */
+  const [convertedBill, setConvertedBill] = useState<BillWithItems | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadFromQuotation = useCartStore((state) => state.loadFromQuotation);
@@ -56,7 +60,13 @@ export default function QuotationScreen() {
     (async () => {
       try {
         const found = await getQuotationById(Number(id));
-        if (!cancelled) setQuotation(found);
+        if (cancelled) return;
+        setQuotation(found);
+
+        if (found?.converted_bill_id != null) {
+          const bill = await getBillById(found.converted_bill_id);
+          if (!cancelled) setConvertedBill(bill);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -240,9 +250,20 @@ export default function QuotationScreen() {
           accessibilityLabel="Open the bill this quotation became">
           <Ionicons name="checkmark-circle" size={20} color={Colors.inStock} />
           <View style={styles.linkText}>
-            <Text style={styles.linkTitle}>Converted into a bill</Text>
+            <Text style={styles.linkTitle}>
+              {convertedBill
+                ? `Converted to ${convertedBill.invoice_number}`
+                : 'Converted into a bill'}
+            </Text>
             <Text style={styles.muted}>
               {quotation.converted_at ? formatDate(quotation.converted_at) : ''} — tap to open it
+            </Text>
+            {/* Said here rather than at the moment of editing: the two
+                documents are separate from the moment the bill exists, and
+                someone reading the quotation should know that before they
+                change it, not after. */}
+            <Text style={styles.muted}>
+              Editing or deleting this quotation will not change that bill.
             </Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
@@ -271,6 +292,44 @@ export default function QuotationScreen() {
         )}
         <Text style={styles.shareButtonText}>{sharing ? 'Preparing…' : 'Share quotation'}</Text>
       </Pressable>
+
+      <View style={styles.editRow}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.shareButton,
+            styles.editRowButton,
+            pressed && styles.shareButtonPressed,
+          ]}
+          onPress={() => {
+            startEditingQuotation(quotation.id).catch((err: Error) => setError(err.message));
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Edit this quotation">
+          <Ionicons name="create-outline" size={20} color={Colors.brand} />
+          <Text style={styles.shareButtonText}>Edit</Text>
+        </Pressable>
+
+        <Pressable
+          style={({ pressed }) => [
+            styles.dangerButton,
+            styles.editRowButton,
+            pressed && styles.shareButtonPressed,
+          ]}
+          onPress={() =>
+            confirmDeleteQuotation(
+              quotation,
+              // Back to the list: this screen is showing something that no
+              // longer exists.
+              () => router.replace('/(tabs)/quotations'),
+              setError
+            )
+          }
+          accessibilityRole="button"
+          accessibilityLabel="Delete this quotation">
+          <Ionicons name="trash-outline" size={20} color={Colors.outOfStock} />
+          <Text style={styles.dangerButtonText}>Delete</Text>
+        </Pressable>
+      </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </ScrollView>
@@ -339,5 +398,18 @@ const styles = StyleSheet.create({
   },
   shareButtonPressed: { backgroundColor: Colors.background },
   shareButtonText: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.brand },
+  editRow: { flexDirection: 'row', gap: Spacing.sm },
+  editRowButton: { flex: 1 },
+  dangerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    minHeight: Spacing.minTapTarget,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.outOfStock,
+  },
+  dangerButtonText: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.outOfStock },
   error: { fontSize: FontSizes.small, color: Colors.outOfStock },
 });

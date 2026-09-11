@@ -43,6 +43,14 @@ export type QuotationCustomerField = keyof QuotationCustomer;
 type QuotationState = {
   lines: QuotationLine[];
   customer: QuotationCustomer;
+  /**
+   * The quotation being edited, or null when this is a new one (T5.9).
+   *
+   * Mirrors `editingBillId` on the cart: the editor is the same screen that
+   * makes a new quotation, and this is what makes it save over the existing
+   * one — keeping its Q-number — instead of issuing another.
+   */
+  editingQuotationId: number | null;
   addProduct: (product: Product) => void;
   setQty: (productId: number, qty: number) => void;
   changeQty: (productId: number, delta: number) => void;
@@ -51,6 +59,12 @@ type QuotationState = {
   setCustomerField: (field: QuotationCustomerField, value: string) => void;
   /** Replaces the whole quotation — used when re-opening one to copy. */
   load: (lines: QuotationLine[], customer: QuotationCustomer) => void;
+  /** Replaces it and marks the editor as editing that saved quotation. */
+  loadForEdit: (
+    lines: QuotationLine[],
+    customer: QuotationCustomer,
+    quotationId: number
+  ) => void;
   clear: () => void;
 };
 
@@ -62,6 +76,7 @@ function normaliseQty(qty: number): number {
 export const useQuotationStore = create<QuotationState>((set) => ({
   lines: [],
   customer: EMPTY_QUOTATION_CUSTOMER,
+  editingQuotationId: null,
 
   addProduct: (product) =>
     set((state) => {
@@ -118,9 +133,13 @@ export const useQuotationStore = create<QuotationState>((set) => ({
   setCustomerField: (field, value) =>
     set((state) => ({ customer: { ...state.customer, [field]: value } })),
 
-  load: (lines, customer) => set({ lines, customer }),
+  load: (lines, customer) => set({ lines, customer, editingQuotationId: null }),
 
-  clear: () => set({ lines: [], customer: EMPTY_QUOTATION_CUSTOMER }),
+  loadForEdit: (lines, customer, quotationId) =>
+    set({ lines, customer, editingQuotationId: quotationId }),
+
+  clear: () =>
+    set({ lines: [], customer: EMPTY_QUOTATION_CUSTOMER, editingQuotationId: null }),
 }));
 
 export const selectQuotationLines = (state: QuotationState) => state.lines;

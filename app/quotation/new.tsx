@@ -19,12 +19,13 @@ import ProductPickRow from '@/components/ProductPickRow';
 import QuotationItemRow from '@/components/QuotationItemRow';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { listProducts, listUsedCategories, type Product } from '@/db/products';
-import { createQuotation } from '@/db/quotations';
+import { createQuotation, editQuotation } from '@/db/quotations';
 import { ALL_CATEGORIES, buildCategoryFilters } from '@/lib/categories';
 import { formatRupees } from '@/lib/format';
 import { calculateBill } from '@/lib/gst';
 import { buildNewQuotation } from '@/lib/quotationDraft';
 import { peekQuotationNumber } from '@/lib/quotationNumber';
+import { deleteQuotationPdf } from '@/lib/quotationPdf';
 import { getDatabase } from '@/db/init';
 import {
   selectQuotationCustomer,
@@ -76,6 +77,7 @@ export default function NewQuotationScreen() {
   const removeLine = useQuotationStore((state) => state.removeLine);
   const setCustomerField = useQuotationStore((state) => state.setCustomerField);
   const clear = useQuotationStore((state) => state.clear);
+  const editingQuotationId = useQuotationStore((state) => state.editingQuotationId);
 
   const hasSearchTerm = debouncedSearch.trim().length > 0;
   const hasCategory = category !== ALL_CATEGORIES;
@@ -189,7 +191,19 @@ export default function NewQuotationScreen() {
     setSaving(true);
     setError(null);
     try {
-      const quotation = await createQuotation(buildNewQuotation({ lines, customer }));
+      const draft = buildNewQuotation({ lines, customer });
+
+      // Two ways in, one screen: a new quotation takes the next reference, an
+      // edit saves over the existing one and keeps its own. Nothing else about
+      // the flow differs, which is why the editor is not a second screen.
+      const quotation =
+        editingQuotationId !== null
+          ? await editQuotation(editingQuotationId, draft)
+          : await createQuotation(draft);
+
+      // The stored PDF holds the pre-edit figures under the same reference.
+      if (editingQuotationId !== null) deleteQuotationPdf(quotation.reference_number);
+
       // Only cleared once it is safely written, so a failure leaves the
       // quotation on screen to retry rather than retyped.
       clear();
@@ -203,14 +217,21 @@ export default function NewQuotationScreen() {
     } finally {
       setSaving(false);
     }
-  }, [canSave, lines, customer, clear]);
+  }, [canSave, lines, customer, editingQuotationId, clear]);
 
   return (
     <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Stack.Screen
-        options={{ title: nextReference ? `New Quotation ${nextReference}` : 'New Quotation' }}
+        options={{
+          title:
+            editingQuotationId !== null
+              ? 'Edit Quotation'
+              : nextReference
+                ? `New Quotation ${nextReference}`
+                : 'New Quotation',
+        }}
       />
 
       <View style={styles.searchRow}>
@@ -355,7 +376,9 @@ export default function NewQuotationScreen() {
             {saving ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.saveButtonText}>Save Quotation</Text>
+              <Text style={styles.saveButtonText}>
+              {editingQuotationId !== null ? 'Save changes' : 'Save Quotation'}
+            </Text>
             )}
           </Pressable>
         </View>

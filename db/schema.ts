@@ -165,6 +165,8 @@ export type QuotationRow = {
    */
   converted_bill_id: number | null;
   converted_at: string | null;
+  /** When the quotation was last edited, or NULL if it never has been. */
+  edited_at: string | null;
   created_at: string;
 };
 
@@ -185,6 +187,15 @@ export type QuotationItemRow = {
   taxable_value: number;
   gst_amount: number;
   line_total: number;
+};
+
+/** One prior version of a quotation, kept when it is edited (migration 009). */
+export type QuotationEditRow = {
+  id: number;
+  quotation_id: number;
+  edited_at: string;
+  /** JSON: the quotation's totals and lines as they stood before this edit. */
+  snapshot: string;
 };
 
 /** One prior version of a bill, kept when it is edited (migration 008). */
@@ -449,6 +460,30 @@ const migration008: Migration = {
   },
 };
 
+const migration009: Migration = {
+  version: 9,
+  name: 'quotation_edit',
+  up: async (db) => {
+    // Only an edit trail. There is no `deleted_at` here, unlike `bills`:
+    // deleting a quotation is a real delete, because its reference number has
+    // to be free to reuse and `reference_number` is UNIQUE. That is the exact
+    // opposite of a bill, whose number must stay consumed forever — and the
+    // reason the two differ is that a quotation is an offer, not a tax record.
+    await db.execAsync(`
+      ALTER TABLE quotations ADD COLUMN edited_at TEXT;
+
+      CREATE TABLE quotation_edits (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        quotation_id INTEGER NOT NULL REFERENCES quotations (id) ON DELETE CASCADE,
+        edited_at    TEXT    NOT NULL,
+        snapshot     TEXT    NOT NULL
+      );
+
+      CREATE INDEX idx_quotation_edits_quotation_id ON quotation_edits (quotation_id);
+    `);
+  },
+};
+
 /**
  * Every migration ever shipped, in order. Append only.
  */
@@ -461,6 +496,7 @@ export const MIGRATIONS: Migration[] = [
   migration006,
   migration007,
   migration008,
+  migration009,
 ];
 
 /** The schema version the current build of the app expects. */

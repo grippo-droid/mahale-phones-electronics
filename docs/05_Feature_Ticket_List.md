@@ -106,6 +106,8 @@ Android print sheet, which drives any printer Android can already see.
 
 - [x] **T5.8** — Add Edit and Delete to a bill, from the bill screen and from History. Editing reopens it in the billing flow — items, quantities, amounts and units — keeping the original invoice number and date, recalculating GST and totals on save, adjusting stock by the difference, and keeping the replaced version in an internal edit history. Deleting removes it from History and the totals, asking each time whether the items should go back into stock. *(Added after Phase 7 began, at the owner's request. Migration 008; deletion is soft so the invoice number stays consumed and can never be reissued.)*
 
+- [x] **T5.9** — Add Edit and Delete for quotations, from the quotation screen and from the Quotes list, mirroring T5.8. Editing keeps the Q-number, recalculates totals and keeps the replaced version; a converted quotation stays editable and its bill is untouched, with a note on screen naming that bill. Deleting removes the quotation outright — no stock question, since a quotation never moves any — and frees its Q-number if it was the most recently issued. *(Added after Phase 7 began, at the owner's request. Migration 009; deletion is real rather than soft, because the reference has to be reusable and `reference_number` is UNIQUE — the opposite conclusion to a bill's, from the same principle.)*
+
 ## Phase 6 — Backup & Restore
 
 - [x] **T6.1** — Build `db/backup.ts`: export SQLite DB + manifest to a single shareable file. *(Reads the format as well as writing it, so T6.3 restores something already known to parse.)*

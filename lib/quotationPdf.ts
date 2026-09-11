@@ -233,6 +233,26 @@ export async function generateQuotationPdf(
   return destination.uri;
 }
 
+/**
+ * Removes the generated PDF for a quotation.
+ *
+ * Called after an edit and after a delete. The file is named by reference
+ * number, so a stale one would be found and reshared by
+ * `existingQuotationPdf` — and after a delete the number can be reissued, which
+ * would attach the old document to a different customer's quotation.
+ */
+export function deleteQuotationPdf(reference: string): void {
+  try {
+    const file = new File(
+      new Directory(Paths.document, QUOTATION_DIRECTORY_NAME),
+      `${quotationNumberToFileName(reference)}.pdf`
+    );
+    if (file.exists) file.delete();
+  } catch {
+    // Best effort; nothing depends on it succeeding.
+  }
+}
+
 /** The PDF for a quotation, if one has already been generated. */
 export function existingQuotationPdf(reference: string): string | null {
   try {

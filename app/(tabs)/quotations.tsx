@@ -3,6 +3,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   StyleSheet,
@@ -16,6 +17,7 @@ import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { listQuotations } from '@/db/quotations';
 import type { QuotationRow } from '@/db/schema';
 import { formatBillDay, formatRupees } from '@/lib/format';
+import { confirmDeleteQuotation, startEditingQuotation } from '@/lib/quotationActions';
 
 /**
  * Quotations (T5.7) — offers made, separate from bills raised.
@@ -64,6 +66,39 @@ export default function QuotationsScreen() {
     useCallback(() => {
       load();
     }, [load])
+  );
+
+  /** Edit or delete from the row, mirroring History. */
+  const showActions = useCallback(
+    (quotation: QuotationRow) => {
+      Alert.alert(
+        quotation.reference_number,
+        `${quotation.customer_name} · ${formatRupees(quotation.grand_total)}`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Edit',
+            onPress: () => {
+              startEditingQuotation(quotation.id).catch((err: Error) => setError(err.message));
+            },
+          },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () =>
+              confirmDeleteQuotation(
+                quotation,
+                // Dropped from the list rather than reloaded, so the scroll
+                // position survives working through several.
+                () =>
+                  setQuotations((current) => current.filter((row) => row.id !== quotation.id)),
+                setError
+              ),
+          },
+        ]
+      );
+    },
+    []
   );
 
   return (
@@ -122,7 +157,9 @@ export default function QuotationsScreen() {
             quotations.length === 0 ? styles.emptyContent : styles.listContent
           }
           keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => <QuotationRowItem quotation={item} />}
+          renderItem={({ item }) => (
+            <QuotationRowItem quotation={item} onShowActions={showActions} />
+          )}
           ListEmptyComponent={<EmptyState search={search} openOnly={openOnly} />}
         />
       )}
@@ -139,7 +176,13 @@ export default function QuotationsScreen() {
   );
 }
 
-function QuotationRowItem({ quotation }: { quotation: QuotationRow }) {
+function QuotationRowItem({
+  quotation,
+  onShowActions,
+}: {
+  quotation: QuotationRow;
+  onShowActions: (quotation: QuotationRow) => void;
+}) {
   return (
     <Pressable
       style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
@@ -158,7 +201,17 @@ function QuotationRowItem({ quotation }: { quotation: QuotationRow }) {
         <QuotationStatusBadge quotation={quotation} />
       </View>
       <Text style={styles.total}>{formatRupees(quotation.grand_total)}</Text>
-      <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+
+      {/* Same overflow affordance as History, for the same reasons: no gesture
+          dependency, and acting on a row stays separate from opening it. */}
+      <Pressable
+        onPress={() => onShowActions(quotation)}
+        hitSlop={Spacing.sm}
+        style={styles.rowActions}
+        accessibilityRole="button"
+        accessibilityLabel={`Edit or delete quotation ${quotation.reference_number}`}>
+        <Ionicons name="ellipsis-vertical" size={18} color={Colors.textMuted} />
+      </Pressable>
     </Pressable>
   );
 }
@@ -223,6 +276,12 @@ const styles = StyleSheet.create({
   },
   rowPressed: { backgroundColor: Colors.surface },
   rowMain: { flex: 1, gap: Spacing.xs },
+  rowActions: {
+    width: Spacing.minTapTarget - Spacing.md,
+    height: Spacing.minTapTarget - Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   customer: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.text },
   meta: { fontSize: FontSizes.small, color: Colors.textMuted },
   total: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text },
