@@ -30,7 +30,8 @@ import {
   restoreBackup,
   RestoreFailedError,
 } from '@/db/backup';
-import { resetShopData, type ResetSummary } from '@/db/reset';
+import { resetShopData } from '@/db/reset';
+import { showToast } from '@/store/toast';
 import { getLastBackupAt, type BusinessSettingField } from '@/db/settings';
 import { describeBackupStatus } from '@/lib/backupStatus';
 import { formatDate } from '@/lib/format';
@@ -168,7 +169,6 @@ export default function SettingsScreen() {
   const [resetText, setResetText] = useState('');
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
-  const [resetDone, setResetDone] = useState<ResetSummary | null>(null);
 
   // The undo is offered only when there is something to undo, so this is the
   // presence of the safety copy rather than a flag we set ourselves — a flag
@@ -252,6 +252,12 @@ export default function SettingsScreen() {
     setLastBackup(made.manifest.createdAt);
     setBackingUp(false);
 
+    // Deliberately says the file was made and stops there. The share sheet
+    // never reports whether the transfer succeeded, so anything warmer would
+    // claim more than the app can know — the same reason the status line says
+    // "Last backup" and never "your data is safe".
+    showToast(`Backup made — ${made.fileName}`);
+
     try {
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(made.uri, {
@@ -277,7 +283,6 @@ export default function SettingsScreen() {
   const openReset = useCallback(() => {
     setResetText('');
     setResetError(null);
-    setResetDone(null);
     setResetOpen(true);
   }, []);
 
@@ -299,7 +304,18 @@ export default function SettingsScreen() {
     try {
       const summary = await resetShopData();
       useCartStore.getState().clear();
-      setResetDone(summary);
+
+      // Closes rather than showing a "Done" step. The confirmation carries no
+      // decision, so a second modal screen to dismiss is pure friction — but
+      // the figures are worth keeping, so they go in the banner.
+      setResetOpen(false);
+      showToast(
+        `Cleared ${summary.products} ${summary.products === 1 ? 'product' : 'products'}` +
+          ` and ${summary.bills} ${summary.bills === 1 ? 'bill' : 'bills'}` +
+          (summary.invoiceCounters > 0 || summary.quotationCounterCleared
+            ? '. Numbering starts from the beginning again.'
+            : '.')
+      );
     } catch (err) {
       setResetError(
         ownerMessage(err, 'The data could not be cleared, so nothing was changed. Please try again.')
@@ -391,9 +407,8 @@ export default function SettingsScreen() {
               useCartStore.getState().clear();
               setLastBackup(await getLastBackupAt());
 
-              Alert.alert(
-                mode === 'undo' ? 'Put back' : 'Restored',
-                `${held.charAt(0).toUpperCase()}${held.slice(1)} are back.`
+              showToast(
+                `${mode === 'undo' ? 'Put back' : 'Restored'} — ${held} are back.`
               );
             } catch (err) {
               setBackupError(ownerMessage(err, 'The backup could not be restored.'));
@@ -933,26 +948,7 @@ export default function SettingsScreen() {
         onRequestClose={() => (resetting ? undefined : setResetOpen(false))}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            {resetDone ? (
-              <>
-                <Text style={styles.modalTitle}>Done</Text>
-                <Text style={styles.modalBody}>
-                  Cleared {resetDone.products} {resetDone.products === 1 ? 'product' : 'products'}
-                  {' and '}
-                  {resetDone.bills} {resetDone.bills === 1 ? 'bill' : 'bills'}
-                  {resetDone.invoiceCounters > 0
-                    ? '. Invoice numbering starts from the beginning again.'
-                    : '.'}
-                </Text>
-                <Pressable
-                  style={({ pressed }) => [styles.modalPrimary, pressed && styles.saveButtonPressed]}
-                  onPress={() => setResetOpen(false)}
-                  accessibilityRole="button">
-                  <Text style={styles.modalPrimaryText}>Close</Text>
-                </Pressable>
-              </>
-            ) : (
-              <>
+            <>
                 <Text style={styles.modalTitle}>Reset shop data?</Text>
                 <Text style={styles.modalBody}>
                   This removes every product and every bill on this phone, and cannot be undone.
@@ -1022,8 +1018,7 @@ export default function SettingsScreen() {
                     )}
                   </Pressable>
                 </View>
-              </>
-            )}
+            </>
           </View>
         </View>
       </Modal>
@@ -1183,14 +1178,6 @@ const styles = StyleSheet.create({
   },
   modalDangerDisabled: { opacity: 0.4 },
   modalDangerText: { fontSize: FontSizes.body, fontWeight: '700', color: '#FFFFFF' },
-  modalPrimary: {
-    minHeight: Spacing.minTapTarget,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
-    backgroundColor: Colors.brand,
-  },
-  modalPrimaryText: { fontSize: FontSizes.body, fontWeight: '700', color: '#FFFFFF' },
   modalSecondary: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -22,7 +22,7 @@ import GstSummary from '@/components/GstSummary';
 import QuickPickList, { type QuickPickSection } from '@/components/QuickPickList';
 import ProductPickRow from '@/components/ProductPickRow';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import { createBill, editBill } from '@/db/bills';
+import { createBill, editBill, getBillById } from '@/db/bills';
 import { AlreadyConvertedError, convertQuotationToBill } from '@/db/quotations';
 import {
   FREQUENTLY_SOLD_WINDOW_DAYS,
@@ -42,6 +42,7 @@ import type { BillUnit } from '@/lib/units';
 import { invoiceNumberGenerator } from '@/lib/invoiceNumber';
 import { deleteBillPdf } from '@/lib/pdf';
 import { selectBusinessState, useSettingsStore } from '@/store/settings';
+import { showToast } from '@/store/toast';
 import {
   selectCustomer,
   selectItemCount,
@@ -465,6 +466,14 @@ export default function BillingScreen() {
       setTouched({});
       setStep('items');
       setSearchInput('');
+
+      // The bill screen it lands on shows the figures, so this only has to
+      // confirm which of the three things just happened.
+      showToast(
+        editingBillId !== null
+          ? 'Changes saved'
+          : `Bill saved — ${(await getBillById(billId))?.invoice_number ?? ''}`.trim()
+      );
 
       router.push({ pathname: '/bill/[id]', params: { id: String(billId) } });
     } catch (err) {

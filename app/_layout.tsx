@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import Toast from '@/components/Toast';
 import { initDatabase } from '@/db/init';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { useSettingsStore } from '@/store/settings';
@@ -67,6 +68,11 @@ export default function RootLayout() {
         <Stack.Screen name="bill/new" options={{ title: 'New Bill' }} />
         <Stack.Screen name="bill/[id]" options={{ title: 'Bill' }} />
       </Stack>
+
+      {/* Mounted once, above every screen, because several actions report on a
+          different screen from the one that started them — adding a product
+          navigates back to Inventory before it can say anything. */}
+      <Toast />
     </>
   );
 }

@@ -25,6 +25,7 @@ import { formatRupees } from '@/lib/format';
 import { calculateBill } from '@/lib/gst';
 import { buildNewQuotation } from '@/lib/quotationDraft';
 import { peekQuotationNumber } from '@/lib/quotationNumber';
+import { showToast } from '@/store/toast';
 import { deleteQuotationPdf } from '@/lib/quotationPdf';
 import { getDatabase } from '@/db/init';
 import {
@@ -240,6 +241,12 @@ export default function NewQuotationScreen() {
 
       // The stored PDF holds the pre-edit figures under the same reference.
       if (editingQuotationId !== null) deleteQuotationPdf(quotation.reference_number);
+
+      showToast(
+        editingQuotationId !== null
+          ? 'Changes saved'
+          : `Quotation saved — ${quotation.reference_number}`
+      );
 
       // Only cleared once it is safely written, so a failure leaves the
       // quotation on screen to retry rather than retyped.

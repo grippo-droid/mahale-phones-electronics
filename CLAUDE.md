@@ -1122,6 +1122,35 @@ says nothing about them:
   duplication mostly adds a way for stale data to reappear unannounced, and
   Security & Access already treats a backup as being as sensitive as the phone.
   Verify with `npx expo config --type introspect`, not by reading `app.json`.
+- **Confirmations are a banner, and the banner replaced dialogs rather than
+  adding to them** (T7.3). A message saying something SUCCEEDED carries no
+  decision, so it is the least deserving of a modal — dismissing it is pure
+  friction. The restore success `Alert` and the reset's "Done" modal step are
+  both gone; their wording moved into the banner, counts included.
+- **The banner lives in a store, not in screen state, because several actions
+  report on a DIFFERENT screen from the one that started them.** Adding a
+  product navigates back to Inventory, generating a bill goes to the bill,
+  saving a quotation goes to the quotation — local state would be unmounted
+  before it could say anything. It is mounted once in `app/_layout.tsx`.
+- **It never takes a touch** (`pointerEvents: 'none'`) and sits above the tab
+  bar, so it can appear over the Billing summary bar or the Inventory "+" button
+  without swallowing a tap meant for them. Nothing to dismiss, which is what
+  makes it not a dialog.
+- **The dismiss timer is keyed to the toast's id.** Two saves in quick
+  succession replace one another, and the first one's timer must not clear the
+  second off the screen a moment after it appeared — a negative control removes
+  the id check and catches exactly that.
+- **"Saved — Hikvision Dome" names the product on purpose.** The Inventory list
+  is alphabetical, so a new product lands mid-list rather than at the top and is
+  genuinely hard to find among thirty others. The name is what confirms the save
+  actually happened; a bare "Saved" would leave the owner hunting.
+- **The backup banner says the file was made and stops there.** The share sheet
+  never reports whether the transfer succeeded, so anything warmer would claim
+  more than the app can know — the same reason the status line reads "Last
+  backup" and never "your data is safe".
+- **Nothing that needs acting on goes in the banner.** It disappears on its own,
+  so anything important enough to miss does not belong there. Errors that need a
+  decision stay inline on the screen that owns them.
 - **Internal error messages never reach the screen.** `getDatabase()` throws
   "Database not initialised yet — await initDatabase() first", which is a note
   to a developer; on a counter it just looks like the app has broken. Settings
