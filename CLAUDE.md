@@ -457,6 +457,52 @@ confirmation of the shop's existing signage/branding.
   combine in the query, and one control (`backToBill`) clears both. Leaving the
   user to work out that two separate things need clearing to see the bill again
   would be needless.
+- **Editing a bill keeps its invoice number and its date** (migration 008).
+  The number is the customer's reference and may already be on a printed copy;
+  the date decides which GST return period the sale falls in, so moving it would
+  refile the sale in a different month. Only the contents change.
+- **Stock is adjusted by the DIFFERENCE, one statement per product.** Not "add
+  the old quantities back, then take the new ones off": that passes through a
+  value which is briefly wrong, and a failure between the two halves would leave
+  stock inflated by a whole bill. Billing one more unit takes one more off the
+  shelf, one fewer puts one back, a removed line returns all of it, an added
+  line takes all of it, and a line whose product was deleted moves nothing. A
+  negative control replaces the delta with the new quantity and the suite fails
+  on four separate figures.
+- **An edit clears `pdf_path`, and the caller deletes the file.** The stored PDF
+  is named by invoice number and still holds the PRE-EDIT figures, so
+  `existingBillPdf` would find it and reshare it — handing the customer a
+  document that disagrees with the shop's record under the same number, which is
+  the single thing `lib/pdf.ts` exists to prevent.
+- **The version being replaced is written to `bill_edits` first**, as a JSON
+  snapshot rather than normalised rows. It is never queried, only read back
+  whole if a dispute arises, and a second copy of `bill_items` would have to be
+  migrated forward forever alongside the real one.
+- **Deletion is soft: `bills.deleted_at`.** The invoice number stays consumed,
+  because reissuing it would hand two customers the same reference — worse than
+  the gap a deletion leaves in the sequence — and the customer may still hold
+  the printed copy. Every read meaning "the shop's sales" excludes deleted rows
+  through `buildBillFilter`, which is what keeps a History page and its own
+  summary describing the same set. `getSalesSummary`, `countBills` and
+  `listFrequentlySold` exclude them separately. **`invoiceNumberExists` must NOT**
+  — it exists to stop reuse, and a deleted bill's number is still issued.
+- **Whether stock returns on delete is asked every time, with no default.** Both
+  answers are ordinary: a bill entered by mistake never left the shelf, so its
+  stock should come back; a bill deleted because the goods went out unbilled
+  should put nothing back. A default would be wrong about half the time,
+  silently. Deleting twice is a no-op, so stock cannot be restored twice.
+- **A soft-deleted bill keeps a converted quotation's link intact.** Under a
+  hard delete, `converted_bill_id`'s `ON DELETE SET NULL` would quietly make the
+  quotation convertible again — a second bill from a quotation already billed.
+- **`idx_bills_live_date` is `(deleted_at, date DESC)`, and the order matters.**
+  Migration 008 first added an index on `deleted_at` alone, which undid T7.5:
+  `deleted_at` is NULL for almost every row, so the index is nearly useless, but
+  SQLite still chose it for the equality test and then walked every live bill —
+  "frequently sold" went straight back to costing the shop's entire history.
+  With `date` as the second column the same index satisfies `deleted_at = NULL`
+  AND the date range, and the cost stays tied to the window. Measured flat at
+  ~2 ms from 2,300 to 689,000 rows. The T7.5 guard now asserts the **date bound
+  drives**, not an index name — a name check would have passed on the bad index.
 - **A quotation is its own table, not a flag on `bills`** (migration 007). It
   takes no invoice number and must never advance that counter — ten quotations
   and no sales has to leave the invoice series untouched. It moves no stock. It

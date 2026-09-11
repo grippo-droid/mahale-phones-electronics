@@ -20,6 +20,7 @@ import { formatDate, formatRupees } from '@/lib/format';
 import { rupeesInWords } from '@/lib/numberToWords';
 import { formatQuantityWithUnit } from '@/lib/units';
 import PaymentTags from '@/components/PaymentTags';
+import { confirmDeleteBill, startEditingBill } from '@/lib/billActions';
 import {
   buildBillHtml,
   existingBillPdf,
@@ -365,6 +366,44 @@ export default function BillResultScreen() {
           </Text>
         </Pressable>
 
+        <View style={styles.editRow}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.outlineButton,
+              styles.editRowButton,
+              pressed && styles.secondaryButtonPressed,
+            ]}
+            onPress={() => {
+              startEditingBill(bill.id).catch((err: Error) => setPdfError(err.message));
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Edit this bill">
+            <Ionicons name="create-outline" size={20} color={Colors.brand} />
+            <Text style={styles.outlineButtonText}>Edit</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.dangerButton,
+              styles.editRowButton,
+              pressed && styles.secondaryButtonPressed,
+            ]}
+            onPress={() =>
+              confirmDeleteBill(
+                bill,
+                // Nothing to come back to: this screen shows a bill that no
+                // longer belongs in History.
+                () => router.replace('/dashboard'),
+                (message) => setPdfError(message)
+              )
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Delete this bill">
+            <Ionicons name="trash-outline" size={20} color={Colors.outOfStock} />
+            <Text style={styles.dangerButtonText}>Delete</Text>
+          </Pressable>
+        </View>
+
         <Pressable
           style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}
           onPress={() => router.replace('/dashboard')}
@@ -522,4 +561,17 @@ const styles = StyleSheet.create({
   },
   secondaryButtonPressed: { backgroundColor: Colors.surface },
   secondaryButtonText: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.text },
+  editRow: { flexDirection: 'row', gap: Spacing.sm },
+  editRowButton: { flex: 1 },
+  dangerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    minHeight: Spacing.minTapTarget,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.outOfStock,
+  },
+  dangerButtonText: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.outOfStock },
 });

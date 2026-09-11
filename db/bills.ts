@@ -2,7 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { getDatabase } from './init';
 import { likeClause, likeTerm } from '@/lib/likeSearch';
-import type { BillItemRow, BillRow } from './schema';
+import type { BillEditRow, BillItemRow, BillRow } from './schema';
 
 /**
  * Bill CRUD (T1.4).
@@ -240,7 +240,11 @@ function buildBillFilter(options: BillListOptions): {
   clause: string;
   params: (string | number)[];
 } {
-  const where: string[] = [];
+  // Deleted bills are not the shop's sales, so they leave every list and every
+  // total through this one clause — `listBills` and `summariseBills` both build
+  // their WHERE here, which is what keeps a History page and its own summary
+  // describing the same set of rows.
+  const where: string[] = ['deleted_at IS NULL'];
   const params: (string | number)[] = [];
 
   if (options.search?.trim()) {
@@ -331,7 +335,8 @@ export async function getSalesSummary(
   db: SQLiteDatabase = getDatabase()
 ): Promise<SalesSummary> {
   const row = await db.getFirstAsync<{ bill_count: number; total: number | null }>(
-    'SELECT COUNT(*) AS bill_count, SUM(grand_total) AS total FROM bills WHERE date >= ? AND date <= ?',
+    `SELECT COUNT(*) AS bill_count, SUM(grand_total) AS total FROM bills
+      WHERE date >= ? AND date <= ? AND deleted_at IS NULL`,
     startOfLocalDay(from).toISOString(),
     endOfLocalDay(to).toISOString()
   );
@@ -343,6 +348,12 @@ export async function getSalesSummary(
  * used by `lib/invoiceNumber.ts` on every generated number as a last line of
  * defence against reuse — the UNIQUE constraint would catch it, but only by
  * failing the sale at the counter.
+ *
+ * This one deliberately does NOT exclude deleted bills, unlike every other read
+ * here. A deleted bill's number is still an issued number: the customer may be
+ * holding the printed copy, and handing it to somebody else would be far worse
+ * than the gap the deletion leaves in the sequence. That is the whole reason
+ * deletion is soft.
  */
 export async function invoiceNumberExists(
   invoiceNumber: string,
@@ -356,7 +367,7 @@ export async function invoiceNumberExists(
 }
 
 export async function countBills(db: SQLiteDatabase = getDatabase()): Promise<number> {
-  const row = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) AS count FROM bills');
+  const row = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) AS count FROM bills WHERE deleted_at IS NULL');
   return row?.count ?? 0;
 }
 
@@ -375,6 +386,277 @@ export async function countBills(db: SQLiteDatabase = getDatabase()): Promise<nu
  * finished bill that legitimately changes: the money arrives later. The rest is
  * a record of what was agreed and must not be edited.
  */
+// ---------------------------------------------------------------------------
+// Edit and delete (T5.8)
+// ---------------------------------------------------------------------------
+
+/** Everything an edit may change. The invoice number and date are not in it. */
+export type BillEdit = {
+  customer_name: string;
+  customer_phone: string;
+  customer_address?: string | null;
+  customer_gstin?: string | null;
+  customer_state: string;
+  subtotal: number;
+  cgst_total: number;
+  sgst_total: number;
+  igst_total: number;
+  round_off?: number;
+  grand_total: number;
+  payment_type?: string | null;
+  paid?: boolean | null;
+  items: NewBillItem[];
+};
+
+/** What a bill looked like before an edit, as stored in `bill_edits.snapshot`. */
+export type BillSnapshot = {
+  subtotal: number;
+  cgst_total: number;
+  sgst_total: number;
+  igst_total: number;
+  round_off: number;
+  grand_total: number;
+  payment_type: string | null;
+  paid: number | null;
+  customer_name: string;
+  customer_phone: string;
+  customer_state: string;
+  items: {
+    product_id: number | null;
+    product_name_snapshot: string;
+    qty: number;
+    unit: string | null;
+    unit_price_snapshot: number;
+    gst_rate_snapshot: number;
+    line_total: number;
+  }[];
+};
+
+/** Units per product across a set of lines, for working out a stock change. */
+function quantitiesByProduct(
+  items: { product_id: number | null; qty: number }[]
+): Map<number, number> {
+  const totals = new Map<number, number>();
+  for (const item of items) {
+    // A line whose product was deleted has nothing to adjust. It can still be
+    // billed and edited; there is simply no stock behind it.
+    if (item.product_id === null) continue;
+    totals.set(item.product_id, (totals.get(item.product_id) ?? 0) + item.qty);
+  }
+  return totals;
+}
+
+/**
+ * Changes a bill's contents, keeping its invoice number and its date.
+ *
+ * The invoice number stays because it is the customer's reference and may
+ * already be on a printed copy. The date stays because it decides the GST
+ * return period the sale falls in — moving it would refile the sale in a
+ * different month.
+ *
+ * **Stock is adjusted by the DIFFERENCE, in one statement per product.** Not
+ * "add the old quantities back, then take the new ones off": that passes
+ * through a value which is briefly wrong, and if anything failed between the
+ * two the shop would be left with stock silently inflated by a whole bill.
+ * Billing one more unit takes one more off the shelf; billing one fewer puts
+ * one back; a line removed returns all of it; a line added takes all of it.
+ *
+ * The version being replaced is written to `bill_edits` first, so what the
+ * customer was originally given is still on record if they turn up with it.
+ *
+ * `pdf_path` is cleared, because the file it names still holds the OLD figures
+ * under the SAME invoice number — sharing it after an edit would hand the
+ * customer a document that disagrees with the shop's record, which is the one
+ * thing the PDF module exists to prevent. The caller deletes the file itself.
+ */
+export async function editBill(
+  id: number,
+  edit: BillEdit,
+  db: SQLiteDatabase = getDatabase()
+): Promise<BillWithItems> {
+  if (edit.items.length === 0) {
+    throw new Error('A bill needs at least one item.');
+  }
+
+  const now = new Date().toISOString();
+
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const before = await txn.getFirstAsync<BillRow>('SELECT * FROM bills WHERE id = ?', id);
+    if (!before) throw new Error(`Bill ${id} not found.`);
+    if (before.deleted_at !== null) throw new Error('A deleted bill cannot be edited.');
+
+    const beforeItems = await txn.getAllAsync<BillItemRow>(
+      'SELECT * FROM bill_items WHERE bill_id = ? ORDER BY id ASC',
+      id
+    );
+
+    const snapshot: BillSnapshot = {
+      subtotal: before.subtotal,
+      cgst_total: before.cgst_total,
+      sgst_total: before.sgst_total,
+      igst_total: before.igst_total,
+      round_off: before.round_off,
+      grand_total: before.grand_total,
+      payment_type: before.payment_type,
+      paid: before.paid,
+      customer_name: before.customer_name,
+      customer_phone: before.customer_phone,
+      customer_state: before.customer_state,
+      items: beforeItems.map((item) => ({
+        product_id: item.product_id,
+        product_name_snapshot: item.product_name_snapshot,
+        qty: item.qty,
+        unit: item.unit,
+        unit_price_snapshot: item.unit_price_snapshot,
+        gst_rate_snapshot: item.gst_rate_snapshot,
+        line_total: item.line_total,
+      })),
+    };
+
+    await txn.runAsync(
+      'INSERT INTO bill_edits (bill_id, edited_at, snapshot) VALUES (?, ?, ?)',
+      id,
+      now,
+      JSON.stringify(snapshot)
+    );
+
+    const wasBilled = quantitiesByProduct(beforeItems);
+    const nowBilled = quantitiesByProduct(edit.items);
+
+    for (const productId of new Set([...wasBilled.keys(), ...nowBilled.keys()])) {
+      const delta = (nowBilled.get(productId) ?? 0) - (wasBilled.get(productId) ?? 0);
+      if (delta === 0) continue;
+      await txn.runAsync(
+        'UPDATE products SET stock_qty = stock_qty - ?, updated_at = ? WHERE id = ?',
+        delta,
+        now,
+        productId
+      );
+    }
+
+    await txn.runAsync('DELETE FROM bill_items WHERE bill_id = ?', id);
+
+    for (const item of edit.items) {
+      await txn.runAsync(
+        `INSERT INTO bill_items
+           (bill_id, product_id, product_name_snapshot, hsn_code_snapshot, qty, unit,
+            unit_price_snapshot, gst_rate_snapshot, taxable_value,
+            cgst_amount, sgst_amount, igst_amount, line_total)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id,
+        item.product_id,
+        item.product_name_snapshot,
+        item.hsn_code_snapshot ?? null,
+        item.qty,
+        item.unit ?? null,
+        item.unit_price_snapshot,
+        item.gst_rate_snapshot,
+        item.taxable_value,
+        item.cgst_amount,
+        item.sgst_amount,
+        item.igst_amount,
+        item.line_total
+      );
+    }
+
+    await txn.runAsync(
+      `UPDATE bills
+          SET customer_name = ?, customer_phone = ?, customer_address = ?,
+              customer_gstin = ?, customer_state = ?,
+              subtotal = ?, cgst_total = ?, sgst_total = ?, igst_total = ?,
+              round_off = ?, grand_total = ?,
+              payment_type = ?, paid = ?,
+              pdf_path = NULL, edited_at = ?
+        WHERE id = ?`,
+      edit.customer_name.trim(),
+      edit.customer_phone.trim(),
+      edit.customer_address?.trim() || null,
+      edit.customer_gstin?.trim() || null,
+      edit.customer_state.trim(),
+      edit.subtotal,
+      edit.cgst_total,
+      edit.sgst_total,
+      edit.igst_total,
+      edit.round_off ?? 0,
+      edit.grand_total,
+      edit.payment_type ?? null,
+      edit.paid === null || edit.paid === undefined ? null : edit.paid ? 1 : 0,
+      now,
+      id
+    );
+  });
+
+  const updated = await getBillById(id, db);
+  if (!updated) throw new Error('Bill was edited but could not be read back.');
+  return updated;
+}
+
+/** The prior versions of a bill, newest first. Only read if a dispute arises. */
+export async function listBillEdits(
+  billId: number,
+  db: SQLiteDatabase = getDatabase()
+): Promise<{ editedAt: string; snapshot: BillSnapshot }[]> {
+  const rows = await db.getAllAsync<BillEditRow>(
+    'SELECT * FROM bill_edits WHERE bill_id = ? ORDER BY edited_at DESC, id DESC',
+    billId
+  );
+
+  return rows.flatMap((row) => {
+    try {
+      return [{ editedAt: row.edited_at, snapshot: JSON.parse(row.snapshot) as BillSnapshot }];
+    } catch {
+      // A snapshot that will not parse is worth skipping rather than throwing:
+      // this is reference material, and one bad row must not hide the others.
+      return [];
+    }
+  });
+}
+
+/**
+ * Marks a bill deleted, optionally putting its stock back.
+ *
+ * Soft: the row stays and the invoice number stays consumed. Reissuing that
+ * number would hand two customers the same reference, which is worse than the
+ * gap a deletion leaves in the sequence — and the customer may still be holding
+ * the printed copy, so the record is worth keeping either way.
+ *
+ * Whether stock comes back is asked every time and never assumed. Both answers
+ * are ordinary: a bill entered by mistake never left the shelf, so its stock
+ * should return; a bill deleted because the goods went out unbilled should not
+ * put anything back. Guessing would be wrong about half the time, silently.
+ */
+export async function deleteBill(
+  id: number,
+  options: { restoreStock: boolean },
+  db: SQLiteDatabase = getDatabase()
+): Promise<void> {
+  const now = new Date().toISOString();
+
+  await db.withExclusiveTransactionAsync(async (txn) => {
+    const bill = await txn.getFirstAsync<BillRow>('SELECT * FROM bills WHERE id = ?', id);
+    if (!bill) throw new Error(`Bill ${id} not found.`);
+    // Deleting twice must not put the stock back twice.
+    if (bill.deleted_at !== null) return;
+
+    if (options.restoreStock) {
+      const items = await txn.getAllAsync<BillItemRow>(
+        'SELECT * FROM bill_items WHERE bill_id = ?',
+        id
+      );
+      for (const [productId, qty] of quantitiesByProduct(items)) {
+        await txn.runAsync(
+          'UPDATE products SET stock_qty = stock_qty + ?, updated_at = ? WHERE id = ?',
+          qty,
+          now,
+          productId
+        );
+      }
+    }
+
+    await txn.runAsync('UPDATE bills SET deleted_at = ? WHERE id = ?', now, id);
+  });
+}
+
 export async function setBillPaid(
   id: number,
   paid: boolean,

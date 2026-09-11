@@ -3,6 +3,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -14,6 +15,7 @@ import {
 } from 'react-native';
 
 import PaymentTags from '@/components/PaymentTags';
+import { confirmDeleteBill, startEditingBill } from '@/lib/billActions';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { listBills, setBillPaid, summariseBills, type SalesSummary } from '@/db/bills';
 import type { BillRow } from '@/db/schema';
@@ -187,6 +189,56 @@ export default function HistoryScreen() {
   }, []);
 
   /**
+   * Edit or delete, from the row rather than from inside the bill.
+   *
+   * An Alert rather than a bottom sheet: three plain choices need no new
+   * dependency, and Android reads them out in order. The delete path asks its
+   * own question about stock — see `confirmDeleteBill`.
+   */
+  const showActions = useCallback(
+    (bill: BillRow) => {
+      Alert.alert(
+        bill.invoice_number,
+        `${bill.customer_name} · ${formatRupees(bill.grand_total)}`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Edit',
+            onPress: () => {
+              startEditingBill(bill.id).catch((err: Error) => setError(err.message));
+            },
+          },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () =>
+              confirmDeleteBill(
+                bill,
+                // Drop it from the list here rather than reloading: the row is
+                // gone either way, and a reload would lose the scroll position
+                // in a list the owner is working through.
+                () => {
+                  setBills((current) => current.filter((row) => row.id !== bill.id));
+                  loadedCount.current = Math.max(0, loadedCount.current - 1);
+                  setSummary((current) =>
+                    current
+                      ? {
+                          billCount: Math.max(0, current.billCount - 1),
+                          total: current.total - bill.grand_total,
+                        }
+                      : current
+                  );
+                },
+                setError
+              ),
+          },
+        ]
+      );
+    },
+    []
+  );
+
+  /**
    * The only thing that starts a load, covering both cases: it runs when the
    * tab is first focused, and again whenever `loadFirstPage` changes identity,
    * which is exactly when the search term or the date range changes.
@@ -318,6 +370,7 @@ export default function HistoryScreen() {
             <BillRowItem
               bill={item}
               onTogglePaid={togglePaid}
+              onShowActions={showActions}
               busy={savingPaid.has(item.id)}
             />
           )}
@@ -357,10 +410,12 @@ export default function HistoryScreen() {
 function BillRowItem({
   bill,
   onTogglePaid,
+  onShowActions,
   busy,
 }: {
   bill: BillRow;
   onTogglePaid: (bill: BillRow, next: boolean) => void;
+  onShowActions: (bill: BillRow) => void;
   busy: boolean;
 }) {
   return (
@@ -389,7 +444,19 @@ function BillRowItem({
         />
       </View>
       <Text style={styles.billTotal}>{formatRupees(bill.grand_total)}</Text>
-      <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+
+      {/* An overflow tap target rather than swipe actions: swipe needs a
+          gesture dependency this app does not have, and a hidden gesture is
+          not something a first-time user discovers. The nested Pressable takes
+          the touch, so opening the bill and acting on it stay separate. */}
+      <Pressable
+        onPress={() => onShowActions(bill)}
+        hitSlop={Spacing.sm}
+        style={styles.rowActions}
+        accessibilityRole="button"
+        accessibilityLabel={`Edit or delete bill ${bill.invoice_number}`}>
+        <Ionicons name="ellipsis-vertical" size={18} color={Colors.textMuted} />
+      </Pressable>
     </Pressable>
   );
 }
@@ -552,6 +619,12 @@ const styles = StyleSheet.create({
   },
   billRowPressed: { backgroundColor: Colors.surface },
   billMain: { flex: 1, gap: Spacing.xs },
+  rowActions: {
+    width: Spacing.minTapTarget - Spacing.md,
+    height: Spacing.minTapTarget - Spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   billCustomer: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.text },
   billMeta: { fontSize: FontSizes.small, color: Colors.textMuted },
   billTotal: {

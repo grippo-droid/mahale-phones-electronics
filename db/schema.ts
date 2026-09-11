@@ -100,6 +100,17 @@ export type BillRow = {
    */
   payment_type: string | null;
   /**
+   * When the bill was deleted, or NULL while it is live (migration 008).
+   *
+   * Soft, so the invoice number stays consumed — reissuing it would hand two
+   * customers the same number, which is worse than the gap a deletion leaves.
+   * Every read that means "the shop's sales" must exclude these; the one that
+   * must NOT is `invoiceNumberExists`, which exists to stop reuse.
+   */
+  deleted_at: string | null;
+  /** When the bill was last edited, or NULL if it never has been. */
+  edited_at: string | null;
+  /**
    * 1 paid, 0 not paid, NULL not recorded. Deliberately independent of
    * `payment_type`: a credit bill gets paid later and a cash bill can go out
    * unpaid, so one does not determine the other. It only supplies the default.
@@ -174,6 +185,15 @@ export type QuotationItemRow = {
   taxable_value: number;
   gst_amount: number;
   line_total: number;
+};
+
+/** One prior version of a bill, kept when it is edited (migration 008). */
+export type BillEditRow = {
+  id: number;
+  bill_id: number;
+  edited_at: string;
+  /** JSON: the bill's totals and lines as they stood before this edit. */
+  snapshot: string;
 };
 
 export type SchemaVersionRow = {
@@ -383,6 +403,52 @@ const migration007: Migration = {
   },
 };
 
+const migration008: Migration = {
+  version: 8,
+  name: 'bill_edit_and_delete',
+  up: async (db) => {
+    // `deleted_at` NULL means the bill is live. A soft delete rather than a
+    // real one, because the invoice number must stay consumed: reissuing it
+    // would hand two customers the same number, which is worse than the gap a
+    // deletion leaves in the sequence. It also keeps the record if the customer
+    // turns up months later holding the printed copy.
+    //
+    // `edited_at` is NULL until the first edit, so "never touched" and "edited
+    // and happens to match" stay distinguishable.
+    await db.execAsync(`
+      ALTER TABLE bills ADD COLUMN deleted_at TEXT;
+      ALTER TABLE bills ADD COLUMN edited_at  TEXT;
+
+      -- (deleted_at, date) and NOT (deleted_at) alone.
+      --
+      -- An index on deleted_at by itself is nearly useless — it is NULL for
+      -- almost every row — but SQLite will still pick it for the equality test
+      -- and then walk every live bill. That is exactly what it did here, and it
+      -- undid T7.5: "frequently sold" went back to costing the shop's entire
+      -- history instead of the 90 days it reads. With date as the second column
+      -- the same index satisfies the equality AND the date range, so the
+      -- windowed query still reads only the window.
+      CREATE INDEX idx_bills_live_date ON bills (deleted_at, date DESC);
+
+      CREATE TABLE bill_edits (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        bill_id    INTEGER NOT NULL REFERENCES bills (id) ON DELETE CASCADE,
+        edited_at  TEXT    NOT NULL,
+        /**
+         * The bill as it stood BEFORE this edit, as JSON: its totals and its
+         * lines. A snapshot rather than normalised rows on purpose — it is
+         * never queried, only read back whole if a dispute comes up, and a
+         * second copy of bill_items would have to be migrated forward forever
+         * alongside the real one.
+         */
+        snapshot   TEXT    NOT NULL
+      );
+
+      CREATE INDEX idx_bill_edits_bill_id ON bill_edits (bill_id);
+    `);
+  },
+};
+
 /**
  * Every migration ever shipped, in order. Append only.
  */
@@ -394,6 +460,7 @@ export const MIGRATIONS: Migration[] = [
   migration005,
   migration006,
   migration007,
+  migration008,
 ];
 
 /** The schema version the current build of the app expects. */

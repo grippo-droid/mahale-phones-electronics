@@ -22,7 +22,7 @@ import GstSummary from '@/components/GstSummary';
 import QuickPickList, { type QuickPickSection } from '@/components/QuickPickList';
 import ProductPickRow from '@/components/ProductPickRow';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import { createBill } from '@/db/bills';
+import { createBill, editBill } from '@/db/bills';
 import { AlreadyConvertedError, convertQuotationToBill } from '@/db/quotations';
 import {
   FREQUENTLY_SOLD_WINDOW_DAYS,
@@ -40,6 +40,7 @@ import { calculateBill, type SupplyType } from '@/lib/gst';
 import { PAYMENT_TYPES, type PaymentType } from '@/lib/payment';
 import type { BillUnit } from '@/lib/units';
 import { invoiceNumberGenerator } from '@/lib/invoiceNumber';
+import { deleteBillPdf } from '@/lib/pdf';
 import { selectBusinessState, useSettingsStore } from '@/store/settings';
 import {
   selectCustomer,
@@ -121,6 +122,8 @@ export default function BillingScreen() {
   const setPaymentType = useCartStore((state) => state.setPaymentType);
   const setPaid = useCartStore((state) => state.setPaid);
   const sourceQuotationId = useCartStore((state) => state.sourceQuotationId);
+  const editingBillId = useCartStore((state) => state.editingBillId);
+  const editingOriginalTotal = useCartStore((state) => state.editingOriginalTotal);
   const removeLine = useCartStore((state) => state.removeLine);
   const setCustomerField = useCartStore((state) => state.setCustomerField);
   const clear = useCartStore((state) => state.clear);
@@ -408,15 +411,24 @@ export default function BillingScreen() {
         generateInvoiceNumber: invoiceNumberGenerator(),
       };
 
-      // A bill made from a quotation goes through the same writer, with the
-      // quotation marked converted inside the same transaction. Everything else
-      // about it — the numbering, the date, the stock, the confirmations —
-      // is identical to any other sale, which is the point of routing
-      // conversions through this screen rather than writing a bill elsewhere.
-      const billId =
-        sourceQuotationId !== null
-          ? (await convertQuotationToBill(sourceQuotationId, payload)).billId
-          : (await createBill(payload)).id;
+      // Three ways in, one writer. A new sale, a quotation being converted —
+      // which marks the quotation inside the same transaction — or an existing
+      // bill being edited, which keeps its invoice number and its date and
+      // adjusts stock by the difference. Routing all three through this screen
+      // is what keeps the customer step, the oversell confirmation and the
+      // numbering identical for every bill the shop raises.
+      let billId: number;
+      if (editingBillId !== null) {
+        const edited = await editBill(editingBillId, payload);
+        // The stored PDF still holds the pre-edit figures under the same
+        // invoice number; leaving it would reshare the wrong document.
+        deleteBillPdf(edited.invoice_number);
+        billId = edited.id;
+      } else if (sourceQuotationId !== null) {
+        billId = (await convertQuotationToBill(sourceQuotationId, payload)).billId;
+      } else {
+        billId = (await createBill(payload)).id;
+      }
 
       // Only cleared once the bill is safely written. If createBill throws, the
       // cart is still there and the sale can be retried rather than retyped.
@@ -445,7 +457,7 @@ export default function BillingScreen() {
     } finally {
       setGenerating(false);
     }
-  }, [customer, lines, paymentType, paid, sourceQuotationId, clear]);
+  }, [customer, lines, paymentType, paid, sourceQuotationId, editingBillId, clear]);
 
   const handleGenerate = useCallback(() => {
     // Force every outstanding error into view rather than only the touched ones,
@@ -553,6 +565,30 @@ export default function BillingScreen() {
           allLabel="Show the bill"
         />
         </>
+      ) : null}
+
+      {editingBillId !== null ? (
+        <View style={styles.editBanner}>
+          <Ionicons name="create-outline" size={16} color={Colors.brand} />
+          <Text style={styles.editBannerText}>
+            Editing a saved bill. It keeps its invoice number and its original date.
+          </Text>
+        </View>
+      ) : null}
+
+      {/* A bill marked Paid whose total has gone up is claiming money that may
+          not have arrived. Said here rather than blocking the save: the owner
+          may well have taken the difference in cash. */}
+      {editingBillId !== null && paid && editingOriginalTotal !== null
+      && grandTotal > editingOriginalTotal ? (
+        <View style={styles.editWarning}>
+          <Ionicons name="warning" size={16} color={Colors.lowStock} />
+          <Text style={styles.editWarningText}>
+            This bill is marked Paid but the total has gone up by{' '}
+            {formatRupees(grandTotal - editingOriginalTotal)}. Check whether the rest has
+            been received.
+          </Text>
+        </View>
       ) : null}
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -669,14 +705,18 @@ export default function BillingScreen() {
           disabled={generating}
           accessibilityRole="button"
           accessibilityState={{ disabled: generating }}
-          accessibilityLabel="Generate the bill">
+          accessibilityLabel={editingBillId !== null ? 'Save the changes' : 'Generate the bill'}>
           {generating ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Ionicons name="receipt" size={20} color="#FFFFFF" />
+            <Ionicons
+              name={editingBillId !== null ? 'save' : 'receipt'}
+              size={20}
+              color="#FFFFFF"
+            />
           )}
           <Text style={styles.primaryButtonText}>
-            {generating ? 'Saving…' : 'Generate bill'}
+            {generating ? 'Saving…' : editingBillId !== null ? 'Save changes' : 'Generate bill'}
           </Text>
         </Pressable>
       ) : null}
@@ -1095,6 +1135,25 @@ const styles = StyleSheet.create({
   paymentOptionTextSelected: { color: '#FFFFFF' },
   paymentHint: { fontSize: FontSizes.small, color: Colors.textMuted },
   paymentError: { fontSize: FontSizes.small, color: Colors.outOfStock, fontWeight: '600' },
+  editBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    marginHorizontal: Spacing.md,
+    marginBottom: Spacing.sm,
+    padding: Spacing.sm,
+    borderRadius: 8,
+    backgroundColor: Colors.surface,
+  },
+  editBannerText: { flex: 1, fontSize: FontSizes.small, color: Colors.text },
+  editWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.xs,
+    marginHorizontal: Spacing.md,
+    marginBottom: Spacing.sm,
+  },
+  editWarningText: { flex: 1, fontSize: FontSizes.small, color: Colors.lowStock, fontWeight: '600' },
   centered: {
     flex: 1,
     alignItems: 'center',

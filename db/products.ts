@@ -239,7 +239,10 @@ export async function listFrequentlySold(
   const sinceDays = options.sinceDays ?? null;
 
   const params: (string | number)[] = [];
-  let where = '';
+  // A deleted bill is not a sale, so it must not keep a product near the top of
+  // the quick-pick list. This is why the all-time branch still joins `bills`
+  // even though it has no date window to test.
+  const conditions: string[] = ['b.deleted_at IS NULL'];
 
   if (sinceDays !== null) {
     // Counted from the start of the local day `sinceDays` ago, so the window is
@@ -247,9 +250,11 @@ export async function listFrequentlySold(
     const from = new Date();
     from.setDate(from.getDate() - sinceDays);
     from.setHours(0, 0, 0, 0);
-    where = 'WHERE b.date >= ?';
+    conditions.push('b.date >= ?');
     params.push(from.toISOString());
   }
+
+  const where = `WHERE ${conditions.join(' AND ')}`;
 
   params.push(limit);
 

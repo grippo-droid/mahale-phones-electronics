@@ -450,6 +450,29 @@ export async function generateBillPdf(
   return destination.uri;
 }
 
+/**
+ * Removes the generated PDF for a bill.
+ *
+ * Called after an edit. The file is named by invoice number, so the stale one
+ * would be found and reshared by `existingBillPdf` — handing the customer the
+ * pre-edit figures under the same number, which is exactly the disagreement
+ * between their copy and the shop's record that this module exists to prevent.
+ *
+ * Best effort: the bill has already been edited by the time this runs, and a
+ * file that cannot be removed is not worth failing the edit over.
+ */
+export function deleteBillPdf(invoiceNumber: string): void {
+  try {
+    const file = new File(
+      new Directory(Paths.document, BILL_DIRECTORY_NAME),
+      `${invoiceNumberToFileName(invoiceNumber)}.pdf`
+    );
+    if (file.exists) file.delete();
+  } catch {
+    // Nothing to do about it, and nothing depends on it succeeding.
+  }
+}
+
 /** The PDF for a bill, if one has already been generated. */
 export function existingBillPdf(invoiceNumber: string): string | null {
   try {

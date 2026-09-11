@@ -72,6 +72,17 @@ type CartState = {
    * quotation converted in one transaction instead of just writing a bill.
    */
   sourceQuotationId: number | null;
+  /**
+   * The bill being edited, or null when this is a new sale (T5.8).
+   *
+   * Held here for the same reason `sourceQuotationId` is: the cart already
+   * survives a trip to another tab and this has to survive the same trip. It is
+   * what makes the button say "Save changes" and write through `editBill`,
+   * keeping the invoice number and the date, instead of raising a new bill.
+   */
+  editingBillId: number | null;
+  /** The bill's total before editing began, for warning if it rises. */
+  editingOriginalTotal: number | null;
   /** Adds the product, or bumps the quantity if it is already on the bill. */
   addProduct: (product: Product) => void;
   setQty: (productId: number, qty: number) => void;
@@ -80,6 +91,12 @@ type CartState = {
   setPaid: (paid: boolean) => void;
   /** Replaces the whole cart with a quotation's contents, ready to be billed. */
   loadFromQuotation: (lines: CartLine[], customer: Customer, quotationId: number) => void;
+  /** Replaces the whole cart with an existing bill's contents, for editing. */
+  loadForEdit: (
+    lines: CartLine[],
+    customer: Customer,
+    bill: { id: number; grandTotal: number; paymentType: PaymentType | null; paid: boolean }
+  ) => void;
   /** Pass null to clear it — tapping the chosen unit again unsets it. */
   setUnit: (productId: number, unit: BillUnit | null) => void;
   changeQty: (productId: number, delta: number) => void;
@@ -108,6 +125,8 @@ export const useCartStore = create<CartState>((set) => ({
   // Meaningless until a payment type is chosen, and never read before then.
   paid: false,
   sourceQuotationId: null,
+  editingBillId: null,
+  editingOriginalTotal: null,
 
   addProduct: (product) =>
     set((state) => {
@@ -171,7 +190,29 @@ export const useCartStore = create<CartState>((set) => ({
   // customer settles up is decided when they actually pay, not when they were
   // quoted, so it is asked for again like any other bill.
   loadFromQuotation: (lines, customer, quotationId) =>
-    set({ lines, customer, sourceQuotationId: quotationId, paymentType: null, paid: false }),
+    set({
+      lines,
+      customer,
+      sourceQuotationId: quotationId,
+      editingBillId: null,
+      editingOriginalTotal: null,
+      paymentType: null,
+      paid: false,
+    }),
+
+  // The payment type and status ARE carried over here, unlike a conversion:
+  // this is the same sale, already settled one way or another, and asking again
+  // would lose a status the owner set by hand.
+  loadForEdit: (lines, customer, bill) =>
+    set({
+      lines,
+      customer,
+      editingBillId: bill.id,
+      editingOriginalTotal: bill.grandTotal,
+      sourceQuotationId: null,
+      paymentType: bill.paymentType,
+      paid: bill.paid,
+    }),
 
   setUnit: (productId, unit) =>
     set((state) => ({
@@ -211,6 +252,8 @@ export const useCartStore = create<CartState>((set) => ({
       paymentType: null,
       paid: false,
       sourceQuotationId: null,
+      editingBillId: null,
+      editingOriginalTotal: null,
     }),
 }));
 
