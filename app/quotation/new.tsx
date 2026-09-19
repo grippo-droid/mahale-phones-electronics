@@ -18,6 +18,7 @@ import ErrorBanner from '@/components/ErrorBanner';
 import CategoryChips from '@/components/CategoryChips';
 import ContactSuggestions, { useContactSuggestions } from '@/components/ContactSuggestions';
 import ProductPickRow from '@/components/ProductPickRow';
+import QuantityPrompt from '@/components/QuantityPrompt';
 import QuotationItemRow from '@/components/QuotationItemRow';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { listProducts, listUsedCategories, type Product } from '@/db/products';
@@ -28,6 +29,7 @@ import { calculateBill } from '@/lib/gst';
 import { buildNewQuotation } from '@/lib/quotationDraft';
 import { peekQuotationNumber } from '@/lib/quotationNumber';
 import { showToast } from '@/store/toast';
+import { useNewProductStore } from '@/store/newProduct';
 import { deleteQuotationPdf } from '@/lib/quotationPdf';
 import { getDatabase } from '@/db/init';
 import {
@@ -69,6 +71,10 @@ export default function NewQuotationScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showErrors, setShowErrors] = useState(false);
   const [nextReference, setNextReference] = useState<string | null>(null);
+
+  /** A product created from the "not found" button, waiting on a quantity (T9.4). */
+  const [askingQty, setAskingQty] = useState<Product | null>(null);
+  const takeNewProduct = useNewProductStore((state) => state.take);
 
   /** Drops a slower earlier search reply when a newer one has been asked for. */
   const resultsRequestId = useRef(0);
@@ -169,7 +175,39 @@ export default function NewQuotationScreen() {
         .catch(() => {
           // The fixed list still renders without this.
         });
-    }, [loadResults])
+
+      // A product created on a trip to the Add Product form. `take` clears it
+      // as it hands it over, so it cannot be collected twice or land on a
+      // different quotation later. Extended here rather than given a second
+      // focus effect, for the reason there is only one loader per screen.
+      const handed = takeNewProduct('quotation');
+      if (handed) setAskingQty(handed);
+    }, [loadResults, takeNewProduct])
+  );
+
+  /**
+   * Opens the real Add Product form, carrying what was typed.
+   *
+   * The quotation survives the trip: its lines and customer live in the
+   * quotation store, and this screen stays mounted underneath the pushed form.
+   */
+  const addMissingProduct = useCallback(() => {
+    router.push({
+      pathname: '/inventory/add',
+      params: { addTo: 'quotation', name: debouncedSearch.trim() },
+    });
+  }, [debouncedSearch]);
+
+  const addAtQty = useCallback(
+    (product: Product, qty: number) => {
+      addProduct(product);
+      setQty(product.id, qty);
+      setAskingQty(null);
+      // The search that found nothing would now hide the line just added.
+      setSearchInput('');
+      setDebouncedSearch('');
+    },
+    [addProduct, setQty]
   );
 
   // Derived rather than cleared in the effect above: "not browsing" always
@@ -319,6 +357,22 @@ export default function NewQuotationScreen() {
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>Nothing found</Text>
                 <Text style={styles.emptyBody}>Try a different search or category.</Text>
+
+                {/* Only with a term typed: that text is what names the new
+                    product, and a blank form is no better than the Inventory
+                    tab. Same rule as Billing's. */}
+                {debouncedSearch.trim() ? (
+                  <Pressable
+                    style={({ pressed }) => [styles.addMissing, pressed && styles.addMissingPressed]}
+                    onPress={addMissingProduct}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Add ${debouncedSearch.trim()} to Inventory and put it on this quotation`}>
+                    <Ionicons name="add-circle-outline" size={18} color={Colors.brand} />
+                    <Text style={styles.addMissingText} numberOfLines={2}>
+                      Add “{debouncedSearch.trim()}” to Inventory
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
             )
           }
@@ -430,6 +484,14 @@ export default function NewQuotationScreen() {
           </Pressable>
         </View>
       ) : null}
+
+      {/* Asked once, after returning from the Add Product form. */}
+      <QuantityPrompt
+        product={askingQty}
+        target="quotation"
+        onCancel={() => setAskingQty(null)}
+        onConfirm={addAtQty}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -452,6 +514,20 @@ const styles = StyleSheet.create({
   searchSpinner: { marginVertical: Spacing.md },
   empty: { alignItems: 'center', gap: Spacing.sm, padding: Spacing.xl },
   emptyTitle: { fontSize: FontSizes.title, fontWeight: '700', color: Colors.text, textAlign: 'center' },
+  addMissing: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    minHeight: Spacing.minTapTarget,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.brand,
+  },
+  addMissingPressed: { backgroundColor: Colors.brandTint },
+  addMissingText: { flex: 1, fontSize: FontSizes.body, fontWeight: '700', color: Colors.brand },
   emptyBody: { fontSize: FontSizes.body, color: Colors.textMuted, textAlign: 'center' },
   backLink: {
     flexDirection: 'row',

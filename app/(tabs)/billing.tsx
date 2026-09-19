@@ -22,6 +22,7 @@ import CustomerDetailsForm from '@/components/CustomerDetailsForm';
 import GstSummary from '@/components/GstSummary';
 import QuickPickList, { type QuickPickSection } from '@/components/QuickPickList';
 import ProductPickRow from '@/components/ProductPickRow';
+import QuantityPrompt from '@/components/QuantityPrompt';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { createBill, editBill, getBillById } from '@/db/bills';
 import { AlreadyConvertedError, convertQuotationToBill } from '@/db/quotations';
@@ -44,6 +45,7 @@ import { invoiceNumberGenerator } from '@/lib/invoiceNumber';
 import { deleteBillPdf } from '@/lib/pdf';
 import { selectBusinessState, useSettingsStore } from '@/store/settings';
 import { showToast } from '@/store/toast';
+import { useNewProductStore } from '@/store/newProduct';
 import {
   selectCustomer,
   selectItemCount,
@@ -107,6 +109,13 @@ export default function BillingScreen() {
   const [results, setResults] = useState<Product[]>([]);
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * A product just created from the "not found" button, waiting to be put on
+   * this bill once the owner says how many (T9.4).
+   */
+  const [askingQty, setAskingQty] = useState<Product | null>(null);
+  const takeNewProduct = useNewProductStore((state) => state.take);
 
   /** Live stock by product id, refreshed from the database — never from the cart. */
   const [stockById, setStockById] = useState<Record<number, number>>({});
@@ -365,6 +374,47 @@ export default function BillingScreen() {
       setStockById((current) => ({ ...current, [product.id]: product.stock_qty }));
     },
     [addProduct]
+  );
+
+  /**
+   * Opens the real Add Product form, carrying what was typed.
+   *
+   * Nothing about the bill needs saving first: the cart lives in Zustand and
+   * this screen is a tab that stays mounted underneath, so the lines, the
+   * customer and the step are all still here on the way back.
+   */
+  const addMissingProduct = useCallback(() => {
+    router.push({
+      pathname: '/inventory/add',
+      params: { addTo: 'bill', name: debouncedSearch.trim() },
+    });
+  }, [debouncedSearch]);
+
+  /**
+   * Collect a product created on that trip, and ask how many.
+   *
+   * `take` clears it as it hands it over, so a product cannot be collected
+   * twice or land on a different bill later.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      const handed = takeNewProduct('bill');
+      if (handed) setAskingQty(handed);
+    }, [takeNewProduct])
+  );
+
+  const addAtQty = useCallback(
+    (product: Product, qty: number) => {
+      addProduct(product);
+      setQty(product.id, qty);
+      setStockById((current) => ({ ...current, [product.id]: product.stock_qty }));
+      setAskingQty(null);
+      // Back to the bill: the search term that found nothing is no use now, and
+      // leaving it would hide the line just added behind a list of no matches.
+      setSearchInput('');
+      setDebouncedSearch('');
+    },
+    [addProduct, setQty]
   );
 
   const confirmClear = useCallback(() => {
@@ -673,6 +723,7 @@ export default function BillingScreen() {
           term={debouncedSearch}
           category={hasCategory ? category : null}
           onReset={backToBill}
+          onAddToInventory={addMissingProduct}
         />
       ) : (
         <Cart
@@ -776,6 +827,16 @@ export default function BillingScreen() {
           <Text style={styles.viewCartHintText}>Back to the bill</Text>
         </Pressable>
       ) : null}
+
+      {/* Asked once, after returning from the Add Product form. Declining
+          leaves the product in Inventory and off this bill — it is already
+          saved either way, and the button says so. */}
+      <QuantityPrompt
+        product={askingQty}
+        target="bill"
+        onCancel={() => setAskingQty(null)}
+        onConfirm={addAtQty}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -937,9 +998,20 @@ type SearchResultsProps = {
   /** The category being browsed, or null when only a search is in force. */
   category: string | null;
   onReset: () => void;
+  /** Offered only when a term was typed — see the note at the button. */
+  onAddToInventory: () => void;
 };
 
-function SearchResults({ results, searching, inCart, onAdd, term, category, onReset }: SearchResultsProps) {
+function SearchResults({
+  results,
+  searching,
+  inCart,
+  onAdd,
+  term,
+  category,
+  onReset,
+  onAddToInventory,
+}: SearchResultsProps) {
   if (searching && results.length === 0) {
     return (
       <View style={styles.centered}>
@@ -964,6 +1036,24 @@ function SearchResults({ results, searching, inCart, onAdd, term, category, onRe
             ? 'Try part of the name, brand, model number or HSN code.'
             : 'Add one on the Inventory tab, or pick another category.'}
         </Text>
+
+        {/* Offered only when something was typed, because that typed text is
+            what pre-fills the new product's name. Under a category chip with
+            an empty search box there is no name to carry across, and a button
+            that opens a blank form is no better than the Inventory tab. */}
+        {term.trim() ? (
+          <Pressable
+            style={({ pressed }) => [styles.addMissing, pressed && styles.addMissingPressed]}
+            onPress={onAddToInventory}
+            accessibilityRole="button"
+            accessibilityLabel={`Add ${term.trim()} to Inventory and put it on this bill`}>
+            <Ionicons name="add-circle-outline" size={18} color={Colors.brand} />
+            <Text style={styles.addMissingText} numberOfLines={2}>
+              Add “{term.trim()}” to Inventory
+            </Text>
+          </Pressable>
+        ) : null}
+
         <Pressable onPress={onReset} accessibilityRole="button">
           <Text style={styles.viewCartHintText}>Back to the bill</Text>
         </Pressable>
@@ -1208,6 +1298,20 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
   },
   emptyBody: { fontSize: FontSizes.body, color: Colors.textMuted, textAlign: 'center' },
+  addMissing: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    minHeight: Spacing.minTapTarget,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.brand,
+  },
+  addMissingPressed: { backgroundColor: Colors.brandTint },
+  addMissingText: { flex: 1, fontSize: FontSizes.body, fontWeight: '700', color: Colors.brand },
 
   // A FlatList with no flex sizes to its content and overflows the column,
   // which is what put rows behind the pinned summary bar.

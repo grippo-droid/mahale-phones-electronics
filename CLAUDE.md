@@ -472,6 +472,33 @@ races serialise and a guard's behavioural test passes with the guard removed.
   it and calls `withBlockedPermissions`, so no other package can add it either.
   The app only ever calls `launchImageLibraryAsync`, so neither is needed.
   Check with `npx expo config --type introspect`, not by reading `app.json`.
+- **A product not in Inventory can be added from inside a bill or a quotation,
+  and the bill survives the trip** (T9.4). Both stores outlive their screens
+  already, and neither screen unmounts — Billing is a tab and the quotation
+  editor stays beneath the pushed form — so the lines, the customer and even
+  the step are all still there on the way back.
+- **The form is the real one, every field.** A product created mid-sale is a
+  real product; one entered through a shortened form would be missing its HSN
+  code on the invoice it is about to appear on. Only the name is pre-filled,
+  from what was typed looking for it.
+- **The handover is `store/newProduct.ts`, and `take()` clears as it hands
+  over.** `router.back()` carries nothing, so the created product needs
+  somewhere to wait — but a slot like that risks one left behind, collected on
+  an unrelated bill days later. There is no plain read: `take(target)` returns
+  it and clears it in one call, and only when the target matches, so it cannot
+  be collected twice or by the wrong screen.
+- **This path asks how many; tapping an existing product does not.** That
+  inconsistency is deliberate and was the owner's call. Tapping a product in
+  the results lands it at one with its line visible, which is right there. This
+  path is different: the owner has just come back from a form on another
+  screen, the cart is not what they were last looking at, and a silent qty of 1
+  among the other lines is easy to miss.
+- **The prompt is a Modal, never `Alert.prompt`** — iOS-only, and does nothing
+  at all on Android. It would have shipped as a prompt that never appeared, the
+  same trap the reset confirmation avoids.
+- **The button appears only when something was typed.** Under a category chip
+  with an empty search box there is no name to carry across, and a button that
+  opens a blank form is no better than the Inventory tab's own.
 - **The customer's name field reads the address book; nothing else does, and
   nothing is kept** (T9.1). Type two characters and matching contacts appear
   beneath the field; picking one fills the name AND the number, because filling
