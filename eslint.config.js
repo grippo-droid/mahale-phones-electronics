@@ -63,4 +63,24 @@ module.exports = defineConfig([
     files: ["lib/likeSearch.ts"],
     rules: { "no-restricted-syntax": "off" },
   },
+  {
+    // The harness is Node CommonJS, not React Native: it has __dirname, Buffer
+    // and require, and it deliberately reads SQL out of the repositories as
+    // text — which the ESCAPE rule would otherwise flag.
+    files: ["tests/**/*.js"],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: {
+        __dirname: "readonly",
+        __filename: "readonly",
+        module: "writable",
+        require: "readonly",
+        exports: "writable",
+        process: "readonly",
+        Buffer: "readonly",
+        console: "readonly",
+      },
+    },
+    rules: { "no-restricted-syntax": "off" },
+  },
 ]);
