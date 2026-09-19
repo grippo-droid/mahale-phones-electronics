@@ -47,9 +47,31 @@ function readSource(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 }
 
+/**
+ * The same file with its comments removed.
+ *
+ * Use this for any check of the form "this file must NOT contain X". Three
+ * separate checks have been caught matching the comment that EXPLAINS why X is
+ * avoided — "never calls Alert.prompt" matched the note saying it is iOS-only,
+ * and "spells no fallback of its own" matched the note explaining the fallback.
+ * A check that passes because of prose is a check that is not testing the code.
+ *
+ * Deliberately naive: it does not understand a `//` inside a string literal.
+ * That is fine for the question it answers, and a real parser would be a
+ * dependency for no gain here.
+ */
+function readSourceWithoutComments(relativePath) {
+  const NEWLINE = String.fromCharCode(10);
+  return readSource(relativePath)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split(NEWLINE)
+    .map((line) => line.replace(/(^|\s)\/\/.*$/, '$1'))
+    .join(NEWLINE);
+}
+
 /** A scratch directory for a suite that needs real files, removed afterwards. */
 function tempDir(prefix) {
   return fs.mkdtempSync(path.join(require('node:os').tmpdir(), `mpe-${prefix}-`));
 }
 
-module.exports = { createChecker, readSource, tempDir, ROOT };
+module.exports = { createChecker, readSource, readSourceWithoutComments, tempDir, ROOT };

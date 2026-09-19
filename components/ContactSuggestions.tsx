@@ -175,14 +175,21 @@ export default function ContactSuggestions({
               }}
               style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
               accessibilityRole="button"
-              accessibilityLabel={`Use ${suggestion.name}, ${suggestion.displayPhone}`}>
+              accessibilityLabel={
+                suggestion.displayPhone
+                  ? `Use ${suggestion.name}, ${suggestion.displayPhone}`
+                  : `Use ${suggestion.name}, no number saved`
+              }>
               <Ionicons name="person-circle-outline" size={22} color={Colors.textMuted} />
               <View style={styles.rowText}>
                 <Text style={styles.name} numberOfLines={1}>
                   {suggestion.name}
                 </Text>
+                {/* A contact with no number is still offered, since the phone
+                    is optional now — but the line says so rather than sitting
+                    blank, which would read as something failing to load. */}
                 <Text style={styles.number} numberOfLines={1}>
-                  {suggestion.displayPhone}
+                  {suggestion.displayPhone || 'No number saved'}
                   {suggestion.label ? ` · ${suggestion.label}` : ''}
                 </Text>
               </View>

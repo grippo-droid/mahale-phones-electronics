@@ -244,9 +244,11 @@ export default function NewQuotationScreen() {
   // and the number together. See components/ContactSuggestions.tsx.
   const contacts = useContactSuggestions(customer.name);
 
-  const nameError = customer.name.trim().length === 0 ? 'A name is needed.' : null;
-  const phoneError = customer.phone.trim().length === 0 ? 'A phone number is needed.' : null;
-  const canSave = lines.length > 0 && !nameError && !phoneError;
+  // Both optional (T9.5), matching a bill. A quotation is an offer; refusing to
+  // write one down because the customer has not given a name helps nobody.
+  const nameError = null;
+  const phoneError = null;
+  const canSave = lines.length > 0;
 
   const backToItems = useCallback(() => {
     setSearchInput('');

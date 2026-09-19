@@ -15,6 +15,7 @@ import ErrorBanner from '@/components/ErrorBanner';
 import PaymentTags from '@/components/PaymentTags';
 import { useBillPayments } from '@/components/useBillPayments';
 import type { PaidState } from '@/lib/payment';
+import { customerDisplayName } from '@/lib/customer';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { getRecentBills, getSalesSummary } from '@/db/bills';
 import type { BillRow } from '@/db/schema';
@@ -311,10 +312,10 @@ function RecentBillRow({
       style={({ pressed }) => [styles.billRow, pressed && styles.billRowPressed]}
       onPress={() => router.push({ pathname: '/bill/[id]', params: { id: String(bill.id) } })}
       accessibilityRole="button"
-      accessibilityLabel={`Bill ${bill.invoice_number} for ${bill.customer_name}, ${formatRupees(bill.grand_total)}`}>
+      accessibilityLabel={`Bill ${bill.invoice_number} for ${customerDisplayName(bill.customer_name)}, ${formatRupees(bill.grand_total)}`}>
       <View style={styles.billMain}>
         <Text style={styles.billCustomer} numberOfLines={1}>
-          {bill.customer_name}
+          {customerDisplayName(bill.customer_name)}
         </Text>
         <Text style={styles.billMeta} numberOfLines={1}>
           {bill.invoice_number} · {formatBillWhen(bill.date)}

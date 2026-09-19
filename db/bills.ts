@@ -716,8 +716,8 @@ function validateNewBill(input: NewBill): void {
     throw new Error('Give either an invoice number or a generator, not both.');
   }
 
-  if (!input.customer_name?.trim()) throw new Error('Customer name is required.');
-  if (!input.customer_phone?.trim()) throw new Error('Customer phone number is required.');
+  // Neither is required (T9.5). A counter sale to someone who gives no name is
+  // ordinary; the state still blocks, because it decides the tax heads.
   if (!input.customer_state?.trim()) {
     throw new Error('Customer state is required — it decides CGST/SGST versus IGST.');
   }

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 import ErrorBanner from '@/components/ErrorBanner';
+import { customerDisplayName } from '@/lib/customer';
 import QuotationStatusBadge from '@/components/QuotationStatusBadge';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { listQuotations } from '@/db/quotations';
@@ -106,7 +107,7 @@ export default function QuotationsScreen() {
     (quotation: QuotationRow) => {
       Alert.alert(
         quotation.reference_number,
-        `${quotation.customer_name} · ${formatRupees(quotation.grand_total)}`,
+        `${customerDisplayName(quotation.customer_name)} · ${formatRupees(quotation.grand_total)}`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -228,10 +229,10 @@ function QuotationRowItem({
         router.push({ pathname: '/quotation/[id]', params: { id: String(quotation.id) } })
       }
       accessibilityRole="button"
-      accessibilityLabel={`Quotation ${quotation.reference_number} for ${quotation.customer_name}, ${formatRupees(quotation.grand_total)}. Opens it.`}>
+      accessibilityLabel={`Quotation ${quotation.reference_number} for ${customerDisplayName(quotation.customer_name)}, ${formatRupees(quotation.grand_total)}. Opens it.`}>
       <View style={styles.rowMain}>
         <Text style={styles.customer} numberOfLines={1}>
-          {quotation.customer_name}
+          {customerDisplayName(quotation.customer_name)}
         </Text>
         <Text style={styles.meta} numberOfLines={1}>
           {quotation.reference_number} · {formatBillDay(quotation.date)}

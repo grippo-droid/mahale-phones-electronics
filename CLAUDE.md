@@ -311,6 +311,40 @@ races serialise and a guard's behavioural test passes with the guard removed.
   is set, and the stand-in used before that is labelled "approx. until state is
   set" rather than shown as the price. The T3.3 note that claimed plain
   invariance was wrong.
+- **The customer's name and phone are OPTIONAL; only the state blocks** (T9.5).
+  A counter sale to someone who does not want to give a name is ordinary, and
+  refusing to record it is worse than recording it without one — the sale
+  happened either way, and a bill that cannot be raised is a bill that goes in
+  a paper book instead. The state stays required because it decides the tax
+  heads, and a wrong CGST/SGST split is wrong on a tax document.
+- **A partly typed number is still an error.** Nothing is a decision; six
+  digits is a slip, and letting it through would put an unreachable number on
+  the invoice with nothing to say it is wrong. An EMPTY field must not warn
+  either, or every nameless bill nags about a number nobody meant to give.
+- **No migration.** `customer_name` and `customer_phone` are `TEXT NOT NULL` on
+  both tables, and an empty string satisfies that — consistent with the rule
+  that a stored empty string is a decision while a missing row is not.
+- **On screen a missing name is a muted "No name"; on paper the line is
+  omitted.** A list row needs something in the name slot or it reads as broken.
+  A customer's invoice is the opposite: printing "No name" where their name
+  goes reads as a fault, and a `Phone:` label with nothing after it is the same
+  kind of fault. `customerDisplayName` in `lib/customer.ts` is the only
+  definition of the stand-in — five copies of a fallback string drift the way
+  the category chips did — and a test asserts no screen spells its own.
+  "No name" rather than "Walk-in": those assert something nobody recorded,
+  the same reason a missing paid status reads "Not recorded".
+- **The quotation's customer block disappears entirely when empty; the
+  invoice's never does.** The invoice always prints the place of supply beneath
+  the heading, because the state is required — so "Billed to" always has
+  something under it. A quotation collects no state, so name, address and phone
+  are all it has, and the heading has to go with them rather than sit alone
+  over nothing.
+- **A contact with a name but no number is now offered by the address-book
+  lookup.** It used to be dropped, on the reasoning that it "could not fill the
+  field" — which stopped being true the moment a bill could be raised without a
+  number. Its row says "No number saved" rather than sitting blank. A contact
+  with no NAME is still dropped: a row the owner cannot recognise is a puzzle,
+  not a choice.
 - **Customer state and GSTIN are picked and checked, never trusted as typed.**
   The state comes from a fixed list (`constants/states.ts`) because a typo
   decides CGST/SGST versus IGST. A customer's GSTIN carries its own state in its

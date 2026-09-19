@@ -72,15 +72,28 @@ async function run({ check, section }) {
   check('the label tells them apart', many.map((s) => s.label), ['mobile', 'work']);
   check('each row has its own key', new Set(many.map((s) => s.key)).size, 2);
 
-  section('rows that could not fill the field are not offered');
-  const junk = toSuggestions([
+  section('a contact with no usable number is still offered, by name');
+  // That changed when the phone became optional (T9.5). These used to be
+  // dropped because they "could not fill the field", which stopped being true
+  // the moment a bill could be raised without a number.
+  const nameOnly = toSuggestions([
     { id: 'a', givenName: 'No Number', phones: [] },
     { id: 'b', givenName: 'Null Phones', phones: null },
     { id: 'c', givenName: 'Empty String', phones: [{ number: '   ' }] },
     { id: 'd', givenName: 'No Digits', phones: [{ number: '---' }] },
-    { id: 'e', givenName: '', phones: [{ number: '9826351449' }] },
   ]);
-  check('nothing offered that cannot be used', junk, []);
+  check('each is offered once', nameOnly.length, 4);
+  check('with nothing to put in the phone field',
+    nameOnly.map((s) => s.phone), ['', '', '', '']);
+  check('and nothing to show for it either',
+    nameOnly.map((s) => s.displayPhone), ['', '', '', '']);
+  check('the row still says so rather than sitting blank',
+    readSource('components/ContactSuggestions.tsx').includes('No number saved'), true);
+
+  section('but a contact with no NAME is still dropped');
+  // A row the owner cannot recognise is not a choice, it is a puzzle.
+  check('nothing to recognise, nothing offered',
+    toSuggestions([{ id: 'e', givenName: '', phones: [{ number: '9826351449' }] }]), []);
 
   section('the same number twice under one contact is offered once');
   const dupes = toSuggestions([

@@ -122,18 +122,36 @@ export function renderQuotationHtml(
       </div>
     </div>
 
-    <div class="meta">
+    ${
+      // Unlike the invoice's, this block CAN be entirely empty: name, address
+      // and phone are all optional now and there is no place of supply beneath
+      // them, because a quotation collects no state. So the heading goes with
+      // them rather than sitting alone over nothing.
+      quotation.customer_name.trim() ||
+      quotation.customer_address ||
+      quotation.customer_phone.trim()
+        ? `<div class="meta">
       <div>
         <div class="sub">Quotation for</div>
-        <div class="value">${escapeHtml(quotation.customer_name)}</div>
+        ${
+          quotation.customer_name.trim()
+            ? `<div class="value">${escapeHtml(quotation.customer_name)}</div>`
+            : ''
+        }
         ${
           quotation.customer_address
             ? `<div class="muted">${escapeHtml(quotation.customer_address)}</div>`
             : ''
         }
-        <div class="muted">Phone: ${escapeHtml(quotation.customer_phone)}</div>
+        ${
+          quotation.customer_phone.trim()
+            ? `<div class="muted">Phone: ${escapeHtml(quotation.customer_phone)}</div>`
+            : ''
+        }
       </div>
-    </div>
+    </div>`
+        : ''
+    }
 
     <table>
       <thead>

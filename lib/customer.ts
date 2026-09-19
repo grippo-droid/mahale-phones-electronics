@@ -84,6 +84,37 @@ export function isIndianMobile(phone: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Showing a customer who gave no name
+// ---------------------------------------------------------------------------
+
+/**
+ * What stands in for a missing name ON SCREEN.
+ *
+ * One definition, used by every list and every detail screen, because five
+ * copies of a fallback string drift exactly the way the category chips did.
+ *
+ * It is NOT used on the printed documents. A row in a list needs something in
+ * the name slot or it reads as broken, and "No name" is honest about what
+ * happened. An invoice is different: printing "No name" where a customer's name
+ * goes is worse than printing nothing, so the PDF omits the line — see
+ * `lib/pdf.ts`.
+ *
+ * "No name" rather than "Walk-in" or "Counter sale": those assert something
+ * nobody recorded. The same reason a missing paid status reads as "Not
+ * recorded" and not as "Unpaid".
+ */
+export const NO_NAME_LABEL = 'No name';
+
+export function hasCustomerName(name: string | null | undefined): boolean {
+  return (name ?? '').trim().length > 0;
+}
+
+/** The name to show, or the stand-in. Render it muted where it is the stand-in. */
+export function customerDisplayName(name: string | null | undefined): string {
+  return hasCustomerName(name) ? (name ?? '').trim() : NO_NAME_LABEL;
+}
+
+// ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 
@@ -94,19 +125,24 @@ export function validateCustomer(
   const errors: CustomerIssue[] = [];
   const warnings: CustomerIssue[] = [];
 
-  if (customer.name.trim().length === 0) {
-    errors.push({ field: 'name', message: 'Customer name is required.' });
-  }
-
+  // Name and phone are OPTIONAL (T9.5). A counter sale to someone who does not
+  // want to give a name is an ordinary thing, and refusing to record it is
+  // worse than recording it without one: the sale happened either way, and a
+  // bill that cannot be raised is a bill that goes in a paper book instead.
+  //
+  // Only the state still blocks, because it decides the tax heads and a bill
+  // with the wrong CGST/SGST split is wrong on a tax document.
+  //
+  // A partly-typed number is still an error. "Nothing" is a decision; six
+  // digits is a mistake, and letting it through would put an unreachable
+  // number on the invoice with nothing to say it is wrong.
   const digits = phoneDigits(customer.phone);
-  if (digits.length === 0) {
-    errors.push({ field: 'phone', message: 'Phone number is required.' });
-  } else if (digits.length < 10) {
+  if (digits.length > 0 && digits.length < 10) {
     errors.push({
       field: 'phone',
       message: `A phone number needs at least 10 digits — this has ${digits.length}.`,
     });
-  } else if (!isIndianMobile(customer.phone) && digits.length === 10) {
+  } else if (digits.length === 10 && !isIndianMobile(customer.phone)) {
     warnings.push({
       field: 'phone',
       message: 'This does not look like a mobile number. Check it if the bill is to be sent by WhatsApp.',

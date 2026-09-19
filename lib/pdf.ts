@@ -337,9 +337,25 @@ export function renderBillHtml(
     <div class="meta">
       <div>
         <div class="sub">Billed to</div>
-        <div class="value">${escapeHtml(bill.customer_name)}</div>
+        ${
+          // Name and phone are optional (T9.5). A line printed empty, or a
+          // "Phone:" label with nothing after it, reads as a fault on a GST
+          // invoice — worse than the absence it is trying to show. On screen
+          // the name slot gets a muted "No name" instead, because a list row
+          // needs something there; a document does not.
+          //
+          // This block never dangles: the place of supply always prints below,
+          // because the state is still required and decides the tax heads.
+          bill.customer_name.trim()
+            ? `<div class="value">${escapeHtml(bill.customer_name)}</div>`
+            : ''
+        }
         ${bill.customer_address ? `<div class="muted">${escapeHtml(bill.customer_address)}</div>` : ''}
-        <div class="muted">Phone: ${escapeHtml(bill.customer_phone)}</div>
+        ${
+          bill.customer_phone.trim()
+            ? `<div class="muted">Phone: ${escapeHtml(bill.customer_phone)}</div>`
+            : ''
+        }
         ${bill.customer_gstin ? `<div class="gstin">GSTIN: ${escapeHtml(bill.customer_gstin)}</div>` : ''}
         <div class="muted">State: ${escapeHtml(stateWithCode(bill.customer_state))}</div>
       </div>

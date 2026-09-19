@@ -18,6 +18,7 @@ import ErrorBanner from '@/components/ErrorBanner';
 import PaymentTags from '@/components/PaymentTags';
 import { useBillPayments } from '@/components/useBillPayments';
 import type { PaidState } from '@/lib/payment';
+import { customerDisplayName } from '@/lib/customer';
 import { confirmDeleteBill, startEditingBill } from '@/lib/billActions';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { listBills, summariseBills, type SalesSummary } from '@/db/bills';
@@ -187,7 +188,7 @@ export default function HistoryScreen() {
     (bill: BillRow) => {
       Alert.alert(
         bill.invoice_number,
-        `${bill.customer_name} · ${formatRupees(bill.grand_total)}`,
+        `${customerDisplayName(bill.customer_name)} · ${formatRupees(bill.grand_total)}`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -409,10 +410,10 @@ function BillRowItem({
       style={({ pressed }) => [styles.billRow, pressed && styles.billRowPressed]}
       onPress={() => router.push({ pathname: '/bill/[id]', params: { id: String(bill.id) } })}
       accessibilityRole="button"
-      accessibilityLabel={`Bill ${bill.invoice_number} for ${bill.customer_name}, ${formatRupees(bill.grand_total)}. Opens the bill.`}>
+      accessibilityLabel={`Bill ${bill.invoice_number} for ${customerDisplayName(bill.customer_name)}, ${formatRupees(bill.grand_total)}. Opens the bill.`}>
       <View style={styles.billMain}>
         <Text style={styles.billCustomer} numberOfLines={1}>
-          {bill.customer_name}
+          {customerDisplayName(bill.customer_name)}
         </Text>
         <Text style={styles.billMeta} numberOfLines={1}>
           {bill.invoice_number} · {formatTime(bill.date)}

@@ -129,9 +129,14 @@ export function contactName(contact: RawContact): string {
  * design, dismiss or get stuck in. The name repeats down the rows, which is
  * what makes it read as "these are all Ramesh".
  *
- * Contacts with no number are dropped — they cannot fill the field, so
- * offering them would be offering a row that does nothing. Numbers that reduce
- * to no digits at all are dropped for the same reason.
+ * A contact with NO usable number is still offered, with just its name (T9.5).
+ * That reasoning changed when the phone became optional: it used to be dropped
+ * because it "could not fill the field", which stopped being true the moment a
+ * bill could be raised without a number. A contact with a name is still worth a
+ * tap — it fills the name and leaves the phone alone.
+ *
+ * A contact with no NAME is still dropped, in both cases: a row the owner
+ * cannot recognise is not a choice, it is a puzzle.
  */
 export function toSuggestions(contacts: RawContact[]): ContactSuggestion[] {
   const suggestions: ContactSuggestion[] = [];
@@ -141,12 +146,28 @@ export function toSuggestions(contacts: RawContact[]): ContactSuggestion[] {
     const name = contactName(contact);
     if (name.length === 0) return;
 
-    (contact.phones ?? []).forEach((phone, phoneIndex) => {
+    const usable = (contact.phones ?? []).filter((phone) => {
       const raw = (phone?.number ?? '').trim();
-      if (raw.length === 0) return;
+      return raw.length > 0 && phoneDigits(raw).length > 0;
+    });
 
+    if (usable.length === 0) {
+      // Name only. `phone` is empty rather than absent, so picking this row
+      // writes an empty string into the field — which is exactly what the
+      // owner would leave it as.
+      suggestions.push({
+        key: `${contact.id ?? contactIndex}:name-only`,
+        name,
+        label: null,
+        displayPhone: '',
+        phone: '',
+      });
+      return;
+    }
+
+    usable.forEach((phone, phoneIndex) => {
+      const raw = (phone?.number ?? '').trim();
       const digits = phoneDigits(raw);
-      if (digits.length === 0) return;
 
       // The same number twice under one contact is an address-book artefact,
       // not a choice worth offering.

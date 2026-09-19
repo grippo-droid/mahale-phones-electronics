@@ -26,6 +26,7 @@ import {
   type NewPayment,
 } from '@/db/payments';
 import { formatDate, formatRupees } from '@/lib/format';
+import { customerDisplayName, hasCustomerName } from '@/lib/customer';
 import { rupeesInWords } from '@/lib/numberToWords';
 import { formatQuantityWithUnit } from '@/lib/units';
 import PaymentTags from '@/components/PaymentTags';
@@ -313,11 +314,19 @@ export default function BillResultScreen() {
           <View style={styles.divider} />
 
           <Text style={styles.label}>Billed to</Text>
-          <Text style={styles.customerName}>{bill.customer_name}</Text>
+          {/* A row needs something in the name slot or it reads as broken, and
+              "No name" is honest about what happened — muted, so it reads as an
+              absence rather than as a customer called that. The PRINTED bill
+              omits the line instead; see lib/pdf.ts. */}
+          <Text style={[styles.customerName, !hasCustomerName(bill.customer_name) && styles.muted]}>
+            {customerDisplayName(bill.customer_name)}
+          </Text>
           {bill.customer_address ? (
             <Text style={styles.muted}>{bill.customer_address}</Text>
           ) : null}
-          <Text style={styles.muted}>{bill.customer_phone}</Text>
+          {bill.customer_phone.trim() ? (
+            <Text style={styles.muted}>{bill.customer_phone}</Text>
+          ) : null}
           {bill.customer_gstin ? (
             <Text style={styles.gstin}>GSTIN: {bill.customer_gstin}</Text>
           ) : null}

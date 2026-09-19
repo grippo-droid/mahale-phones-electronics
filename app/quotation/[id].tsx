@@ -24,6 +24,7 @@ import {
 } from '@/db/quotations';
 import { getBillById, type BillWithItems } from '@/db/bills';
 import { formatDate, formatRupees } from '@/lib/format';
+import { customerDisplayName, hasCustomerName } from '@/lib/customer';
 import { confirmDeleteQuotation, startEditingQuotation } from '@/lib/quotationActions';
 import { quotationToCartLines } from '@/lib/quotationDraft';
 import { existingQuotationPdf, generateQuotationPdf } from '@/lib/quotationPdf';
@@ -193,11 +194,16 @@ export default function QuotationScreen() {
         <View style={styles.divider} />
 
         <Text style={styles.label}>Quotation for</Text>
-        <Text style={styles.customerName}>{quotation.customer_name}</Text>
+        <Text
+          style={[styles.customerName, !hasCustomerName(quotation.customer_name) && styles.muted]}>
+          {customerDisplayName(quotation.customer_name)}
+        </Text>
         {quotation.customer_address ? (
           <Text style={styles.muted}>{quotation.customer_address}</Text>
         ) : null}
-        <Text style={styles.muted}>{quotation.customer_phone}</Text>
+        {quotation.customer_phone.trim() ? (
+          <Text style={styles.muted}>{quotation.customer_phone}</Text>
+        ) : null}
 
         <View style={styles.divider} />
 
