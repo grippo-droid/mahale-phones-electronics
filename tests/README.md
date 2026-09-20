@@ -65,6 +65,24 @@ go red. Two real examples from this project:
   `converted_bill_id IS NULL`, which also appears in an unrelated list filter.
   Removing the guard from the `UPDATE` left it passing.
 
+## Backup and restore
+
+`backup-format` covers the format itself — encode, decode, every refusal, the
+checksum, the hand-written UTF-8, the WAL-header patch — and round-trips a real
+database through serialise, encode, decode and reopen.
+
+`restore-safety` drives `performRestore` through a fake `RestoreIo`: the step
+order, both rollback paths, the step names carried in failures, and the
+verification against the manifest. That seam exists for this suite; untested
+rollback code is code that has never run.
+
+Neither says a restore works on a phone. Both of this feature's device failures
+— the close-and-swap that silently did nothing, and the WAL header that could
+not be honoured in memory — lived inside the real implementations of those
+steps, which need a filesystem and a native connection cache that this harness
+does not have. `createBackup`, `listBackups`, pruning, `findSafetyCopy`,
+`inspectBackup` and `restoreBackup` are not covered at all.
+
 ## History
 
 This harness lived in a session-scoped temp directory until September 2026, when

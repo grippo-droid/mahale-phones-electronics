@@ -31,8 +31,11 @@
  *   - No native connection cache. The real `SQLiteModule.kt` reference-counts
  *     connections by path, which is what made a close-and-swap restore
  *     silently do nothing. Nothing here models that.
- *   - No WAL. Journal mode is accepted and ignored, so the WAL-header handling
- *     in `db/backup.ts` is exercised only through its pure byte manipulation.
+ *   - WAL is real, but serialisation is not. `node:sqlite` honours
+ *     `journal_mode = wal`, so commits do sit in a -wal file — but it has no
+ *     serialize, so `serializeAsync` reads the file and checkpoints first to
+ *     compensate. The bytes a backup is built from are therefore a file read,
+ *     not SQLite's own snapshot.
  *   - No concurrency. `node:sqlite` is synchronous, so two "concurrent" writes
  *     serialise and a race cannot be driven at all.
  * ---------------------------------------------------------------------------
@@ -104,9 +107,22 @@ class SQLiteDatabase {
   }
 
   async serializeAsync() {
-    // The real one asks SQLite for a consistent snapshot. Reading the file is
-    // equivalent here because nothing else holds the connection and there is
-    // no WAL to miss commits in.
+    // The real one asks SQLite for a consistent snapshot. `node:sqlite` has no
+    // equivalent, so this reads the file — and that is NOT the same thing when
+    // the database is in WAL mode, which this app's is: committed pages sit in
+    // the -wal file and the main file is behind. Reading it raw produced a
+    // backup missing everything written since the last checkpoint, which is
+    // precisely the failure `serializeAsync` was chosen to avoid.
+    //
+    // So the checkpoint is done here rather than left to the caller. The real
+    // API needs no such thing, and a harness that demanded one would make a
+    // correct app change — relying on serializeAsync as documented — look
+    // broken.
+    try {
+      this._db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+    } catch {
+      // Not in WAL mode, or nothing to flush. Either is fine.
+    }
     return new Uint8Array(fs.readFileSync(this._file));
   }
 

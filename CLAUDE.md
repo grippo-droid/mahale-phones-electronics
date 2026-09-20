@@ -207,6 +207,26 @@ Two real misses, both found exactly this way:
   `converted_bill_id IS NULL`, which also appears in an unrelated list filter.
   Removing the guard from the `UPDATE` left it passing.
 
+**Backup and restore are covered as far as they honestly can be.**
+`tests/suites/backup-format.test.js` takes a real database through serialise,
+encode, decode and reopen, and checks every refusal path; it also covers the
+subarray-aliasing trap in `useRollbackJournal`, where patching the decoded
+payload in place reaches back into the backup file and destroys it.
+`tests/suites/restore-safety.test.js` drives `performRestore` through a fake
+`RestoreIo` for the ordering, both rollback paths and the manifest check.
+
+What is NOT covered: `createBackup`, `listBackups`, pruning, `findSafetyCopy`,
+`inspectBackup`, `restoreBackup` and the real `sqliteRestoreIo` — all of which
+need a filesystem. Both device failures of this feature lived in exactly there,
+so a green run is not a statement that a restore works on a phone.
+
+**A shim that is wrong in the safe direction is still wrong.** Writing those
+suites turned up `serializeAsync` reading the database file raw while the app
+runs in WAL — so committed pages sat in the `-wal` and the backup came out
+missing them, which is precisely the failure `serializeAsync` was chosen to
+avoid. It failed loudly rather than passing falsely, but it would have made a
+correct app change look broken. The shim checkpoints first now, and says why.
+
 **Known gaps.** These are not covered, and a passing suite says nothing about
 them: no renderer (screens are checked by reading source, so touch handling
 needs a real build), no filesystem (`expo-file-system` throws), no native

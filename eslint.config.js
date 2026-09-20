@@ -81,6 +81,12 @@ module.exports = defineConfig([
         console: "readonly",
       },
     },
-    rules: { "no-restricted-syntax": "off" },
+    rules: {
+      "no-restricted-syntax": "off",
+      // `useRollbackJournal` in db/backup.ts is a pure function whose name
+      // begins with "use" in the English sense. db/** and lib/** are already
+      // exempt for that reason; a suite that calls it needs the same.
+      "react-hooks/rules-of-hooks": "off",
+    },
   },
 ]);
