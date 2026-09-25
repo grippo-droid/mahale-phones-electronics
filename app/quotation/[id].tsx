@@ -219,6 +219,16 @@ export default function QuotationScreen() {
                 {'  ·  '}
                 {item.gst_rate_snapshot}% GST
               </Text>
+              {/* On screen only. The quotation PDF shows the discounted
+                  price as the price, exactly as the invoice does. */}
+              {item.discount_amount > 0 ? (
+                <Text style={styles.discount}>
+                  {formatRupees(item.discount_amount)} off
+                  {item.discount_type === 'percent' && item.discount_value !== null
+                    ? ` (${item.discount_value}%)`
+                    : ''}
+                </Text>
+              ) : null}
             </View>
             <Text style={styles.itemTotal}>{formatRupees(item.line_total)}</Text>
           </View>
@@ -366,6 +376,7 @@ const styles = StyleSheet.create({
   item: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm, paddingVertical: Spacing.xs },
   itemMain: { flex: 1 },
   itemName: { fontSize: FontSizes.body, color: Colors.text },
+  discount: { fontSize: FontSizes.small, fontWeight: '600', color: Colors.lowStock },
   itemTotal: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   grandLabel: { fontSize: FontSizes.title, fontWeight: '700', color: Colors.text },

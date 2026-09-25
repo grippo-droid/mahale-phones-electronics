@@ -208,6 +208,23 @@ async function run({ check, section }) {
       igst_total REAL NOT NULL DEFAULT 0, round_off REAL NOT NULL DEFAULT 0,
       grand_total REAL NOT NULL DEFAULT 0, pdf_path TEXT, created_at TEXT NOT NULL,
       payment_type TEXT, paid INTEGER);
+    -- A real database at schema 9 has these too. The fixture carried only
+    -- bills until migration 011 began altering them, at which point the
+    -- stand-in stopped resembling the thing it stands in for -- which is the
+    -- same failure mode as a shim that is kinder than the real library.
+    CREATE TABLE bill_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, bill_id INTEGER NOT NULL, product_id INTEGER,
+      product_name_snapshot TEXT NOT NULL, hsn_code_snapshot TEXT, qty INTEGER NOT NULL,
+      unit TEXT, unit_price_snapshot REAL NOT NULL, gst_rate_snapshot REAL NOT NULL DEFAULT 0,
+      taxable_value REAL NOT NULL DEFAULT 0, cgst_amount REAL NOT NULL DEFAULT 0,
+      sgst_amount REAL NOT NULL DEFAULT 0, igst_amount REAL NOT NULL DEFAULT 0,
+      line_total REAL NOT NULL DEFAULT 0);
+    CREATE TABLE quotation_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, quotation_id INTEGER NOT NULL, product_id INTEGER,
+      product_name_snapshot TEXT NOT NULL, hsn_code_snapshot TEXT, qty INTEGER NOT NULL,
+      unit TEXT, unit_price_snapshot REAL NOT NULL, gst_rate_snapshot REAL NOT NULL DEFAULT 0,
+      price_includes_gst INTEGER NOT NULL DEFAULT 0, taxable_value REAL NOT NULL DEFAULT 0,
+      gst_amount REAL NOT NULL DEFAULT 0, line_total REAL NOT NULL DEFAULT 0);
     INSERT INTO schema_version VALUES (1,'a','x'),(2,'b','x'),(3,'c','x'),(4,'d','x'),(5,'e','x'),(6,'f','x'),(7,'g','x'),(8,'h','x'),(9,'i','x');
     INSERT INTO bills (invoice_number, date, customer_name, customer_phone, customer_state, grand_total, paid, created_at)
       VALUES ('WAS-PAID',   '2026-05-01T00:00:00.000Z', 'C', '9', 'Madhya Pradesh', 1500, 1,    '2026-05-01'),

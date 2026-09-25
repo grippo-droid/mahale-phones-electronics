@@ -1,3 +1,4 @@
+import type { LineDiscount } from '@/lib/gst';
 import { create } from 'zustand';
 
 import type { Product } from '@/db/products';
@@ -28,6 +29,8 @@ export type QuotationLine = {
   priceIncludesGst: boolean;
   qty: number;
   unit: BillUnit | null;
+  /** An optional discount on this line (T9.6), or null for none. */
+  discount: LineDiscount | null;
 };
 
 export type QuotationCustomer = {
@@ -55,6 +58,8 @@ type QuotationState = {
   setQty: (productId: number, qty: number) => void;
   changeQty: (productId: number, delta: number) => void;
   setUnit: (productId: number, unit: BillUnit | null) => void;
+  /** The discount on one line, or null to clear it (T9.6). */
+  setDiscount: (productId: number, discount: LineDiscount | null) => void;
   removeLine: (productId: number) => void;
   setCustomerField: (field: QuotationCustomerField, value: string) => void;
   /** Replaces the whole quotation — used when re-opening one to copy. */
@@ -114,6 +119,9 @@ export const useQuotationStore = create<QuotationState>((set) => ({
             priceIncludesGst: product.priceIncludesGst,
             qty: 1,
             unit: null,
+            // No discount until one is asked for. An unasked-for default would
+            // put money back in a customer's pocket by accident.
+            discount: null,
           },
         ],
       };
@@ -133,6 +141,14 @@ export const useQuotationStore = create<QuotationState>((set) => ({
         const next = line.qty + delta;
         return next < 1 ? [] : [{ ...line, qty: normaliseQty(next) }];
       }),
+    })),
+
+  /** Null clears it. A discount is per line, and only ever set deliberately. */
+  setDiscount: (productId, discount) =>
+    set((state) => ({
+      lines: state.lines.map((line) =>
+        line.productId === productId ? { ...line, discount } : line
+      ),
     })),
 
   setUnit: (productId, unit) =>

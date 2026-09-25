@@ -86,6 +86,7 @@ export default function NewQuotationScreen() {
   const setQty = useQuotationStore((state) => state.setQty);
   const changeQty = useQuotationStore((state) => state.changeQty);
   const setUnit = useQuotationStore((state) => state.setUnit);
+  const setDiscount = useQuotationStore((state) => state.setDiscount);
   const removeLine = useQuotationStore((state) => state.removeLine);
   const setCustomerField = useQuotationStore((state) => state.setCustomerField);
   const clear = useQuotationStore((state) => state.clear);
@@ -406,6 +407,7 @@ export default function NewQuotationScreen() {
                 onChangeQty={setQty}
                 onStep={changeQty}
                 onChangeUnit={setUnit}
+                onChangeDiscount={setDiscount}
                 onRemove={removeLine}
               />
             ))

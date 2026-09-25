@@ -8,7 +8,7 @@
  */
 
 import type { NewQuotation, NewQuotationItem, QuotationWithItems } from '@/db/quotations';
-import { calculateBill } from '@/lib/gst';
+import { calculateBill, storedDiscount } from '@/lib/gst';
 import { isBillUnit, type BillUnit } from '@/lib/units';
 import type { CartLine } from '@/store/cart';
 import type { QuotationCustomer, QuotationLine } from '@/store/quotation';
@@ -45,6 +45,7 @@ export function buildNewQuotation(input: QuotationDraftInput): NewQuotation {
       qty: line.qty,
       gstRate: line.gstRate,
       priceIncludesGst: line.priceIncludesGst,
+      discount: line.discount,
     })),
     'inter-state',
     { roundToNearestRupee: true }
@@ -61,6 +62,9 @@ export function buildNewQuotation(input: QuotationDraftInput): NewQuotation {
       unit_price_snapshot: line.unitPrice,
       gst_rate_snapshot: line.gstRate,
       price_includes_gst: line.priceIncludesGst,
+      discount_type: line.discount?.type ?? null,
+      discount_value: line.discount?.value ?? null,
+      discount_amount: computed.discountAmount,
       taxable_value: computed.taxableValue,
       gst_amount: computed.totalTax,
       line_total: computed.lineTotal,
@@ -103,10 +107,34 @@ export function quotationToCartLines(quotation: QuotationWithItems): CartLine[] 
     priceIncludesGst: item.price_includes_gst === 1,
     qty: item.qty,
     unit: asUnit(item.unit),
+    // A discount negotiated on the offer has to survive conversion, or the
+    // customer who was quoted a discounted price is charged the full one.
+    discount: storedDiscount(item.discount_type, item.discount_value),
   }));
 }
 
 /** Stored units are plain TEXT; anything unrecognised becomes "no unit". */
 function asUnit(unit: string | null): BillUnit | null {
   return isBillUnit(unit) ? unit : null;
+}
+
+/** Rebuilds store lines from a saved quotation, so it can be edited. */
+export function quotationToStoreLines(quotation: QuotationWithItems): QuotationLine[] {
+  return quotation.items.map((item) => ({
+    // Keyed by product id like the cart; a deleted product gets a negative
+    // stand-in, unique per line and never a real id.
+    productId: item.product_id ?? -(item.id + 1),
+    name: item.product_name_snapshot,
+    hsnCode: item.hsn_code_snapshot,
+    unitPrice: item.unit_price_snapshot,
+    gstRate: item.gst_rate_snapshot,
+    priceIncludesGst: item.price_includes_gst === 1,
+    qty: item.qty,
+    // Carried back so editing a quotation does not quietly drop the discount
+    // that was negotiated on it. The quoted price is the pre-discount one, so
+    // re-applying it here is right -- unlike a bill line, which has to check
+    // whether its basis was recorded. See `billToCartLines`.
+    discount: storedDiscount(item.discount_type, item.discount_value),
+    unit: isBillUnit(item.unit) ? item.unit : null,
+  }));
 }

@@ -38,7 +38,7 @@ import { ALL_CATEGORIES, buildCategoryFilters } from '@/lib/categories';
 import { buildNewBill, findDeletedProducts, findOversells } from '@/lib/billDraft';
 import { resolveSupplyType, validateCustomer, type CustomerField } from '@/lib/customer';
 import { formatRupees } from '@/lib/format';
-import { calculateBill, type SupplyType } from '@/lib/gst';
+import { calculateBill, type LineDiscount, type SupplyType } from '@/lib/gst';
 import { PAYMENT_TYPES, type PaymentType } from '@/lib/payment';
 import type { BillUnit } from '@/lib/units';
 import { invoiceNumberGenerator } from '@/lib/invoiceNumber';
@@ -131,6 +131,7 @@ export default function BillingScreen() {
   const setQty = useCartStore((state) => state.setQty);
   const changeQty = useCartStore((state) => state.changeQty);
   const setUnit = useCartStore((state) => state.setUnit);
+  const setDiscount = useCartStore((state) => state.setDiscount);
   const paymentType = useCartStore((state) => state.paymentType);
   const paid = useCartStore((state) => state.paid);
   const setPaymentType = useCartStore((state) => state.setPaymentType);
@@ -736,6 +737,7 @@ export default function BillingScreen() {
           onChangeQty={setQty}
           onStep={changeQty}
           onChangeUnit={setUnit}
+          onChangeDiscount={setDiscount}
           onRemove={removeLine}
         />
       )}
@@ -1090,6 +1092,7 @@ type CartProps = {
   onChangeQty: (productId: number, qty: number) => void;
   onStep: (productId: number, delta: number) => void;
   onChangeUnit: (productId: number, unit: BillUnit | null) => void;
+  onChangeDiscount: (productId: number, discount: LineDiscount | null) => void;
   onRemove: (productId: number) => void;
 };
 
@@ -1111,6 +1114,7 @@ function Cart({
   onChangeQty,
   onStep,
   onChangeUnit,
+  onChangeDiscount,
   onRemove,
 }: CartProps) {
   const picks = (separated: boolean) =>
@@ -1163,6 +1167,7 @@ function Cart({
           onChangeQty={onChangeQty}
           onStep={onStep}
           onChangeUnit={onChangeUnit}
+          onChangeDiscount={onChangeDiscount}
           onRemove={onRemove}
         />
       )}

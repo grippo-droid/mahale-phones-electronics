@@ -23,14 +23,62 @@ export type NewBillItem = {
   qty: number;
   /** One of `lib/units.ts`. NULL/omitted means no unit was chosen for this line. */
   unit?: string | null;
+  /** The price as entered, BEFORE any discount. */
   unit_price_snapshot: number;
   gst_rate_snapshot: number;
+  /** Whether that snapshot already contains GST (migration 011). */
+  price_includes_gst?: number | null;
+  /** The discount agreed on this line, and what it actually took off. */
+  discount_type?: string | null;
+  discount_value?: number | null;
+  discount_amount?: number;
   taxable_value: number;
   cgst_amount: number;
   sgst_amount: number;
   igst_amount: number;
   line_total: number;
 };
+
+/**
+ * Writes one line. ONE definition, used by both `createBill` and `editBill`.
+ *
+ * They carried identical inserts until migration 011 added four columns to
+ * each, which is where two copies stop being harmless: a column added to one
+ * and forgotten in the other means an edited bill silently loses its discount,
+ * and the bill still looks right everywhere except the money. The category
+ * chips taught this lesson once already.
+ */
+async function insertBillItem(
+  txn: SQLiteDatabase,
+  billId: number,
+  item: NewBillItem
+): Promise<void> {
+  await txn.runAsync(
+    `INSERT INTO bill_items
+       (bill_id, product_id, product_name_snapshot, hsn_code_snapshot, qty, unit,
+        unit_price_snapshot, gst_rate_snapshot, price_includes_gst,
+        discount_type, discount_value, discount_amount,
+        taxable_value, cgst_amount, sgst_amount, igst_amount, line_total)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    billId,
+    item.product_id,
+    item.product_name_snapshot,
+    item.hsn_code_snapshot ?? null,
+    item.qty,
+    item.unit ?? null,
+    item.unit_price_snapshot,
+    item.gst_rate_snapshot,
+    item.price_includes_gst ?? null,
+    item.discount_type ?? null,
+    item.discount_value ?? null,
+    item.discount_amount ?? 0,
+    item.taxable_value,
+    item.cgst_amount,
+    item.sgst_amount,
+    item.igst_amount,
+    item.line_total
+  );
+}
 
 export type NewBill = {
   /**
@@ -157,26 +205,7 @@ export async function createBill(
     billId = result.lastInsertRowId;
 
     for (const item of input.items) {
-      await txn.runAsync(
-        `INSERT INTO bill_items
-           (bill_id, product_id, product_name_snapshot, hsn_code_snapshot, qty, unit,
-            unit_price_snapshot, gst_rate_snapshot, taxable_value,
-            cgst_amount, sgst_amount, igst_amount, line_total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        billId,
-        item.product_id,
-        item.product_name_snapshot,
-        item.hsn_code_snapshot ?? null,
-        item.qty,
-        item.unit ?? null,
-        item.unit_price_snapshot,
-        item.gst_rate_snapshot,
-        item.taxable_value,
-        item.cgst_amount,
-        item.sgst_amount,
-        item.igst_amount,
-        item.line_total
-      );
+      await insertBillItem(txn, billId, item);
 
       if (item.product_id !== null) {
         await txn.runAsync(
@@ -562,26 +591,7 @@ export async function editBill(
     await txn.runAsync('DELETE FROM bill_items WHERE bill_id = ?', id);
 
     for (const item of edit.items) {
-      await txn.runAsync(
-        `INSERT INTO bill_items
-           (bill_id, product_id, product_name_snapshot, hsn_code_snapshot, qty, unit,
-            unit_price_snapshot, gst_rate_snapshot, taxable_value,
-            cgst_amount, sgst_amount, igst_amount, line_total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        id,
-        item.product_id,
-        item.product_name_snapshot,
-        item.hsn_code_snapshot ?? null,
-        item.qty,
-        item.unit ?? null,
-        item.unit_price_snapshot,
-        item.gst_rate_snapshot,
-        item.taxable_value,
-        item.cgst_amount,
-        item.sgst_amount,
-        item.igst_amount,
-        item.line_total
-      );
+      await insertBillItem(txn, id, item);
     }
 
     await txn.runAsync(

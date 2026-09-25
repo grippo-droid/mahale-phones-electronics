@@ -1058,6 +1058,56 @@ races serialise and a guard's behavioural test passes with the guard removed.
   install, with the message that already existed for that case. None of the WAL
   header handling is affected — that works on bytes 18 and 19 of the file, which
   have nothing to do with the schema.
+- **A discount is per line, optional, and applied BEFORE tax** (T9.6,
+  migration 011). Percentage or flat rupees, chosen per item. Discounted then
+  taxed is the standard ordering and it is also the only one that makes the
+  printed rate honest: the invoice shows `taxable_value / qty`, so what the
+  customer sees as the rate is the rate they were charged.
+- **It comes off the LINE, never off each unit.** A flat ₹100 on a line of
+  three is ₹100, not ₹300. And a percentage taken per unit then multiplied
+  multiplies its rounding error by the quantity — the same reason
+  `calculateLine` already derives the taxable value from the whole line.
+  ₹333.33 × 3 with 10% off is **1,061.99** per line and **1,062.00** per unit;
+  a negative control that apportions per unit fails seven checks on exactly
+  that paisa.
+- **Three columns on the line, not a table.** `discount_type` and
+  `discount_value` are what was agreed; `discount_amount` is what the
+  arithmetic did with it after clamping and rounding. Both are worth keeping:
+  storing only the rate means recomputing money on every read, and storing
+  only the money loses what was promised. A separate table would add a join to
+  every bill read and every PDF render for a 1:0..1 relationship — `unit`
+  (migration 005) set the precedent.
+- **`bill_items.price_includes_gst` exists because of discounts**, though it is
+  not one. `billToCartLines` rebuilt an edited bill's price as
+  `taxable_value / qty`, which was exact while nothing had a discount. With one
+  it is the POST-discount figure, so editing a discounted bill would either
+  take the discount off a second time or bake it into the price and lose the
+  record. Storing the basis lets a discounted line be rebuilt from
+  `unit_price_snapshot` + the flag + the discount, which round-trips. Old rows
+  keep NULL and keep the old derivation, still exact for them because they
+  carry no discount. A negative control drops the discount on rebuild and fails
+  seven checks.
+- **A discount can never exceed the line.** It clamps, the item becomes free,
+  and the field says so. A bigger one would make the taxable value negative,
+  and negative GST cannot appear on a tax invoice. Warn, never block — as with
+  overselling and overpaying.
+- **Visible in the app, invisible on both documents.** The owner sees what came
+  off which line, on which bill, at any time later. The customer sees a price.
+  This needed no change to either template: both already derive the rate from
+  `taxable_value / qty` and neither prints `unit_price_snapshot`, so the
+  discounted rate prints as the ordinary one. There is no label to remove, and
+  a test asserts the pre-discount figure never reaches the HTML.
+- **`billToCartLines` and `quotationToStoreLines` moved into the draft
+  modules.** They lived beside the Alert-and-navigate actions, which import
+  `react-native` — whose Flow-typed source Node cannot strip, so the mapping
+  most in need of testing was the one thing the harness could not load. They
+  are pure, they are the inverse of `buildNewBill` and `buildNewQuotation`, and
+  they now sit next to them.
+- **One insert per item table, not one per caller.** `createBill`/`editBill`
+  and `createQuotation`/`editQuotation` carried identical inserts until this
+  migration added columns to each. That is where two copies stop being
+  harmless: a column added to one and missed in the other loses a discount on
+  edit, and the bill looks right everywhere except the money.
 - **`lib/billDraft.ts` is the only thing that turns a cart into a bill.** It is
   a pure function, so what gets written is checkable without a screen or a
   database, and both the totals shown and the totals stored come from the same

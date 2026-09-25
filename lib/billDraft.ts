@@ -12,9 +12,10 @@
  * defend to a customer or an inspector.
  */
 
-import type { NewBill, NewBillItem } from '@/db/bills';
+import type { BillWithItems, NewBill, NewBillItem } from '@/db/bills';
 import type { Customer } from '@/lib/customer';
-import { calculateBill, type SupplyType } from '@/lib/gst';
+import { calculateBill, storedDiscount, type SupplyType } from '@/lib/gst';
+import { isBillUnit } from '@/lib/units';
 import type { PaymentType } from '@/lib/payment';
 import type { CartLine } from '@/store/cart';
 
@@ -48,6 +49,7 @@ export function buildNewBill(
       qty: line.qty,
       gstRate: line.gstRate,
       priceIncludesGst: line.priceIncludesGst,
+      discount: line.discount,
     })),
     supplyType,
     { roundToNearestRupee: true }
@@ -70,8 +72,19 @@ export function buildNewBill(
       hsn_code_snapshot: line.hsnCode,
       qty: line.qty,
       unit: line.unit,
+      // The price as entered, BEFORE the discount. Together with the basis and
+      // the discount below it, this is what lets an edit rebuild the line
+      // exactly rather than working backwards from a figure the discount has
+      // already been taken out of.
       unit_price_snapshot: line.unitPrice,
       gst_rate_snapshot: line.gstRate,
+      price_includes_gst: line.priceIncludesGst ? 1 : 0,
+      discount_type: line.discount?.type ?? null,
+      discount_value: line.discount?.value ?? null,
+      // What the discount actually took off, after clamping and rounding.
+      // Stored rather than recomputed on read: it is money that was given
+      // away, and it should read back as the same figure for ever.
+      discount_amount: computed.discountAmount,
       taxable_value: computed.taxableValue,
       cgst_amount: computed.cgstAmount,
       sgst_amount: computed.sgstAmount,
@@ -142,4 +155,54 @@ export function findDeletedProducts(
   stockById: Record<number, number>
 ): string[] {
   return lines.filter((line) => stockById[line.productId] === undefined).map((line) => line.name);
+}
+
+
+// ---------------------------------------------------------------------------
+// The other direction
+// ---------------------------------------------------------------------------
+
+/** Rebuilds cart lines from a saved bill, so it can be edited like any cart. */
+export function billToCartLines(bill: BillWithItems): CartLine[] {
+  return bill.items.map((item) => {
+    const discount = storedDiscount(item.discount_type, item.discount_value);
+
+    // Two ways back, and which one is correct depends on whether the line's
+    // price basis was recorded.
+    //
+    // A line written since migration 011 carries `price_includes_gst`, so it is
+    // rebuilt from exactly what was entered: the pre-discount price, its basis,
+    // and the discount. That round-trips.
+    //
+    // An older line has no basis stored, so it is rebuilt from
+    // `taxable_value / qty` as a pre-tax price — which reproduces the stored
+    // figures exactly, and is safe precisely BECAUSE those lines carry no
+    // discount. Using that derivation on a discounted line would be wrong
+    // twice over: `taxable_value` is already the discounted figure, so
+    // re-applying the discount would take it off a second time, and not
+    // re-applying it would bake it into the price and lose the record of what
+    // was actually given.
+    const rebuildFromSnapshot = item.price_includes_gst !== null;
+
+    return {
+      // The cart keys by product id. A line whose product was deleted has none,
+      // so it gets a negative stand-in — unique per line, never a real id, and
+      // mapped back to NULL by `buildNewBill` before it reaches the database.
+      productId: item.product_id ?? -(item.id + 1),
+      name: item.product_name_snapshot,
+      hsnCode: item.hsn_code_snapshot,
+      unitPrice: rebuildFromSnapshot
+        ? item.unit_price_snapshot
+        : item.qty > 0
+          ? item.taxable_value / item.qty
+          : item.unit_price_snapshot,
+      gstRate: item.gst_rate_snapshot,
+      priceIncludesGst: rebuildFromSnapshot ? item.price_includes_gst === 1 : false,
+      qty: item.qty,
+      unit: isBillUnit(item.unit) ? item.unit : null,
+      // Only a line that recorded its basis can carry a discount back, for the
+      // reason above. An older line has none to carry.
+      discount: rebuildFromSnapshot ? discount : null,
+    };
+  });
 }

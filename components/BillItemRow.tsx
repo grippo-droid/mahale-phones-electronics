@@ -3,8 +3,9 @@ import { memo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
+import DiscountField from '@/components/DiscountField';
 import { formatRupees } from '@/lib/format';
-import { calculateLine, type SupplyType } from '@/lib/gst';
+import { calculateLine, type LineDiscount, type SupplyType } from '@/lib/gst';
 import { BILL_UNITS, type BillUnit } from '@/lib/units';
 import type { CartLine } from '@/store/cart';
 
@@ -36,6 +37,8 @@ type Props = {
   onStep: (productId: number, delta: number) => void;
   /** Null clears the unit — tapping the chosen one again unsets it. */
   onChangeUnit: (productId: number, unit: BillUnit | null) => void;
+  /** Null clears the discount on this line (T9.6). */
+  onChangeDiscount: (productId: number, discount: LineDiscount | null) => void;
   onRemove: (productId: number) => void;
 };
 
@@ -46,6 +49,7 @@ function BillItemRow({
   onChangeQty,
   onStep,
   onChangeUnit,
+  onChangeDiscount,
   onRemove,
 }: Props) {
   // Held as text while editing so the field can be briefly empty mid-typing;
@@ -74,6 +78,7 @@ function BillItemRow({
       qty: line.qty,
       gstRate: line.gstRate,
       priceIncludesGst: line.priceIncludesGst,
+      discount: line.discount,
     },
     supplyType
   );
@@ -176,6 +181,14 @@ function BillItemRow({
           );
         })}
       </View>
+
+      {/* Under the units, for the same reason they sit under the stepper: the
+          quantity is what every line needs and the discount is what few do. */}
+      <DiscountField
+        discount={line.discount}
+        lineGross={totals.grossBeforeDiscount}
+        onChange={(discount) => onChangeDiscount(line.productId, discount)}
+      />
 
       {missing ? (
         <View style={styles.warning}>

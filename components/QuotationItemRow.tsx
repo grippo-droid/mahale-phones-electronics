@@ -3,6 +3,8 @@ import { memo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
+import DiscountField from '@/components/DiscountField';
+import type { LineDiscount } from '@/lib/gst';
 import { formatRupees } from '@/lib/format';
 import { calculateLine } from '@/lib/gst';
 import { BILL_UNITS, type BillUnit } from '@/lib/units';
@@ -29,10 +31,19 @@ type Props = {
   onChangeQty: (productId: number, qty: number) => void;
   onStep: (productId: number, delta: number) => void;
   onChangeUnit: (productId: number, unit: BillUnit | null) => void;
+  /** Null clears the discount on this line (T9.6). */
+  onChangeDiscount: (productId: number, discount: LineDiscount | null) => void;
   onRemove: (productId: number) => void;
 };
 
-function QuotationItemRow({ line, onChangeQty, onStep, onChangeUnit, onRemove }: Props) {
+function QuotationItemRow({
+  line,
+  onChangeQty,
+  onStep,
+  onChangeUnit,
+  onChangeDiscount,
+  onRemove,
+}: Props) {
   // Held as text while editing so the field can be briefly empty mid-typing;
   // only valid whole numbers reach the store.
   const [qtyText, setQtyText] = useState(String(line.qty));
@@ -53,6 +64,7 @@ function QuotationItemRow({ line, onChangeQty, onStep, onChangeUnit, onRemove }:
       qty: line.qty,
       gstRate: line.gstRate,
       priceIncludesGst: line.priceIncludesGst,
+      discount: line.discount,
     },
     'inter-state'
   );
@@ -141,6 +153,12 @@ function QuotationItemRow({ line, onChangeQty, onStep, onChangeUnit, onRemove }:
           );
         })}
       </View>
+
+      <DiscountField
+        discount={line.discount}
+        lineGross={totals.grossBeforeDiscount}
+        onChange={(discount) => onChangeDiscount(line.productId, discount)}
+      />
     </View>
   );
 }

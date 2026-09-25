@@ -1,9 +1,9 @@
 import { Alert } from 'react-native';
 import { router } from 'expo-router';
 
-import { deleteQuotation, getQuotationById, type QuotationWithItems } from '@/db/quotations';
-import { isBillUnit } from '@/lib/units';
-import { useQuotationStore, type QuotationLine } from '@/store/quotation';
+import { deleteQuotation, getQuotationById } from '@/db/quotations';
+import { quotationToStoreLines } from '@/lib/quotationDraft';
+import { useQuotationStore } from '@/store/quotation';
 
 /**
  * Editing and deleting a quotation (T5.9), shared by its screen and its list.
@@ -18,21 +18,6 @@ import { useQuotationStore, type QuotationLine } from '@/store/quotation';
  *     moment it exists.
  */
 
-/** Rebuilds store lines from a saved quotation, so it can be edited. */
-export function quotationToStoreLines(quotation: QuotationWithItems): QuotationLine[] {
-  return quotation.items.map((item) => ({
-    // Keyed by product id like the cart; a deleted product gets a negative
-    // stand-in, unique per line and never a real id.
-    productId: item.product_id ?? -(item.id + 1),
-    name: item.product_name_snapshot,
-    hsnCode: item.hsn_code_snapshot,
-    unitPrice: item.unit_price_snapshot,
-    gstRate: item.gst_rate_snapshot,
-    priceIncludesGst: item.price_includes_gst === 1,
-    qty: item.qty,
-    unit: isBillUnit(item.unit) ? item.unit : null,
-  }));
-}
 
 /**
  * Loads a quotation into the quotation store and opens the editor.

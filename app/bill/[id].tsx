@@ -351,6 +351,20 @@ export default function BillResultScreen() {
                   {item.gst_rate_snapshot}% GST
                   {item.hsn_code_snapshot ? `  ·  HSN ${item.hsn_code_snapshot}` : ''}
                 </Text>
+                {/* Shown here and nowhere on the printed bill. The owner
+                    needs to know what was given away and on which line; the
+                    customer sees only the price they paid. */}
+                {item.discount_amount > 0 ? (
+                  <Text style={styles.discount}>
+                    {formatRupees(item.discount_amount)} off
+                    {item.discount_type === 'percent' && item.discount_value !== null
+                      ? ` (${item.discount_value}%)`
+                      : ''}
+                    {'  ·  was '}
+                    {formatRupees(item.unit_price_snapshot)}
+                    {item.qty > 1 ? ' each' : ''}
+                  </Text>
+                ) : null}
               </View>
               <Text style={styles.itemTotal}>{formatRupees(item.line_total)}</Text>
             </View>
@@ -592,6 +606,9 @@ const styles = StyleSheet.create({
   },
   itemMain: { flex: 1, gap: 2 },
   itemName: { fontSize: FontSizes.body, color: Colors.text, fontWeight: '600' },
+  // Amber, like every other figure that is worth a second look rather than
+  // being wrong. Money given away is not an error.
+  discount: { fontSize: FontSizes.small, fontWeight: '600', color: Colors.lowStock },
   itemTotal: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text },
 
   tableHeader: { flexDirection: 'row', gap: Spacing.sm, paddingBottom: Spacing.xs },

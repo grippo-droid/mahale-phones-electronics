@@ -32,13 +32,54 @@ export type NewQuotationItem = {
   hsn_code_snapshot?: string | null;
   qty: number;
   unit?: string | null;
+  /** The price as quoted, BEFORE any discount. */
   unit_price_snapshot: number;
   gst_rate_snapshot: number;
   price_includes_gst: boolean;
+  /** The discount agreed on this line, and what it took off (migration 011). */
+  discount_type?: string | null;
+  discount_value?: number | null;
+  discount_amount?: number;
   taxable_value: number;
   gst_amount: number;
   line_total: number;
 };
+
+/**
+ * Writes one quotation line. One definition, two callers — `createQuotation`
+ * and `editQuotation` — for the reason `insertBillItem` exists: they carried
+ * identical inserts, and a column added to one and missed in the other loses a
+ * discount on edit without anything looking wrong.
+ */
+async function insertQuotationItem(
+  txn: SQLiteDatabase,
+  quotationId: number,
+  item: NewQuotationItem
+): Promise<void> {
+  await txn.runAsync(
+    `INSERT INTO quotation_items
+       (quotation_id, product_id, product_name_snapshot, hsn_code_snapshot, qty, unit,
+        unit_price_snapshot, gst_rate_snapshot, price_includes_gst,
+        discount_type, discount_value, discount_amount,
+        taxable_value, gst_amount, line_total)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    quotationId,
+    item.product_id,
+    item.product_name_snapshot,
+    item.hsn_code_snapshot ?? null,
+    item.qty,
+    item.unit ?? null,
+    item.unit_price_snapshot,
+    item.gst_rate_snapshot,
+    item.price_includes_gst ? 1 : 0,
+    item.discount_type ?? null,
+    item.discount_value ?? null,
+    item.discount_amount ?? 0,
+    item.taxable_value,
+    item.gst_amount,
+    item.line_total
+  );
+}
 
 export type NewQuotation = {
   /** Defaults to now. */
@@ -109,25 +150,7 @@ export async function createQuotation(
     quotationId = result.lastInsertRowId;
 
     for (const item of input.items) {
-      await txn.runAsync(
-        `INSERT INTO quotation_items
-           (quotation_id, product_id, product_name_snapshot, hsn_code_snapshot, qty, unit,
-            unit_price_snapshot, gst_rate_snapshot, price_includes_gst,
-            taxable_value, gst_amount, line_total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        quotationId,
-        item.product_id,
-        item.product_name_snapshot,
-        item.hsn_code_snapshot ?? null,
-        item.qty,
-        item.unit ?? null,
-        item.unit_price_snapshot,
-        item.gst_rate_snapshot,
-        item.price_includes_gst ? 1 : 0,
-        item.taxable_value,
-        item.gst_amount,
-        item.line_total
-      );
+      await insertQuotationItem(txn, quotationId, item);
     }
   });
 
@@ -294,25 +317,7 @@ export async function editQuotation(
     await txn.runAsync('DELETE FROM quotation_items WHERE quotation_id = ?', id);
 
     for (const item of input.items) {
-      await txn.runAsync(
-        `INSERT INTO quotation_items
-           (quotation_id, product_id, product_name_snapshot, hsn_code_snapshot, qty, unit,
-            unit_price_snapshot, gst_rate_snapshot, price_includes_gst,
-            taxable_value, gst_amount, line_total)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        id,
-        item.product_id,
-        item.product_name_snapshot,
-        item.hsn_code_snapshot ?? null,
-        item.qty,
-        item.unit ?? null,
-        item.unit_price_snapshot,
-        item.gst_rate_snapshot,
-        item.price_includes_gst ? 1 : 0,
-        item.taxable_value,
-        item.gst_amount,
-        item.line_total
-      );
+      await insertQuotationItem(txn, id, item);
     }
 
     // converted_bill_id and converted_at are deliberately absent from this

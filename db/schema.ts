@@ -134,6 +134,26 @@ export type BillItemRow = {
   unit: string | null;
   unit_price_snapshot: number;
   gst_rate_snapshot: number;
+  /**
+   * The discount agreed on this line, or NULL for none (migration 011).
+   * 'percent' with value 10 is 10% off; 'amount' with value 100 is ₹100 off
+   * the LINE, not off each unit.
+   */
+  discount_type: string | null;
+  discount_value: number | null;
+  /**
+   * What that actually took off, in rupees — after clamping to the line's own
+   * value and rounding. Kept alongside the agreement because they are
+   * different facts: one is what was promised, the other is what the
+   * arithmetic did with it.
+   */
+  discount_amount: number;
+  /**
+   * Whether `unit_price_snapshot` already contains the GST. NULL on every line
+   * written before migration 011 — those are rebuilt from `taxable_value`
+   * instead, which is exact for them because they carry no discount.
+   */
+  price_includes_gst: number | null;
   taxable_value: number;
   cgst_amount: number;
   sgst_amount: number;
@@ -184,6 +204,11 @@ export type QuotationItemRow = {
   gst_rate_snapshot: number;
   /** Kept so converting rebuilds the cart line exactly as it was quoted. */
   price_includes_gst: number;
+  /** As on a bill line (migration 011). A discount negotiated on the offer
+      has to survive conversion, or the customer is charged full price. */
+  discount_type: string | null;
+  discount_value: number | null;
+  discount_amount: number;
   taxable_value: number;
   gst_amount: number;
   line_total: number;
@@ -541,6 +566,49 @@ const migration010: Migration = {
   },
 };
 
+const migration011: Migration = {
+  version: 11,
+  name: 'line_discounts',
+  up: async (db) => {
+    // An optional discount on one line, stored where the line is. A discount is
+    // one fact about one line with no history of its own, so a separate table
+    // would add a join to every bill read and every PDF render for a 1:0..1
+    // relationship. `unit` (migration 005) set the precedent.
+    //
+    // Three columns rather than one, because "20% off" and "the 200 rupees that
+    // came off" are different facts and both are worth keeping: the first is
+    // what was agreed with the customer, the second is what the arithmetic
+    // actually did with it after clamping and rounding. Storing only the rate
+    // would mean recomputing the money every time it is read, and storing only
+    // the money would lose what was agreed.
+    //
+    // All nullable, nothing backfilled. NULL means no discount, which is the
+    // truth for every line ever billed before this.
+    //
+    // `price_includes_gst` is the one that is not about discounts, and it is
+    // the reason this migration exists in the shape it does. `billToCartLines`
+    // rebuilds an edited bill's unit price as `taxable_value / qty`, because
+    // the basis was never stored on a bill line and that derivation reproduces
+    // the stored figures exactly. With a discount it stops being exact:
+    // `taxable_value` is the POST-discount figure, so editing a discounted bill
+    // would either apply the discount a second time or silently bake it into
+    // the price and lose the record of it. Storing the basis lets a discounted
+    // line be rebuilt from `unit_price_snapshot` + this flag + the discount,
+    // which round-trips. Old rows keep NULL and keep the old derivation, which
+    // is still exact for them because they have no discount.
+    await db.execAsync(`
+      ALTER TABLE bill_items ADD COLUMN discount_type      TEXT;
+      ALTER TABLE bill_items ADD COLUMN discount_value     REAL;
+      ALTER TABLE bill_items ADD COLUMN discount_amount    REAL NOT NULL DEFAULT 0;
+      ALTER TABLE bill_items ADD COLUMN price_includes_gst INTEGER;
+
+      ALTER TABLE quotation_items ADD COLUMN discount_type   TEXT;
+      ALTER TABLE quotation_items ADD COLUMN discount_value  REAL;
+      ALTER TABLE quotation_items ADD COLUMN discount_amount REAL NOT NULL DEFAULT 0;
+    `);
+  },
+};
+
 /**
  * Every migration ever shipped, in order. Append only.
  */
@@ -555,6 +623,7 @@ export const MIGRATIONS: Migration[] = [
   migration008,
   migration009,
   migration010,
+  migration011,
 ];
 
 /** The schema version the current build of the app expects. */
