@@ -18,7 +18,7 @@ import QuotationStatusBadge from '@/components/QuotationStatusBadge';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { listQuotations } from '@/db/quotations';
 import type { QuotationRow } from '@/db/schema';
-import { formatBillDay, formatRupees } from '@/lib/format';
+import { formatBillDay, formatRupees, formatTime } from '@/lib/format';
 import { confirmDeleteQuotation, startEditingQuotation } from '@/lib/quotationActions';
 import {
   selectQuotationItemCount,
@@ -235,7 +235,8 @@ function QuotationRowItem({
           {customerDisplayName(quotation.customer_name)}
         </Text>
         <Text style={styles.meta} numberOfLines={1}>
-          {quotation.reference_number} · {formatBillDay(quotation.date)}
+          {quotation.reference_number} · {formatBillDay(quotation.date)},{' '}
+          {formatTime(quotation.date)}
         </Text>
         <QuotationStatusBadge quotation={quotation} />
       </View>

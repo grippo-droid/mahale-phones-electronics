@@ -23,7 +23,7 @@ import {
   type QuotationWithItems,
 } from '@/db/quotations';
 import { getBillById, type BillWithItems } from '@/db/bills';
-import { formatDate, formatRupees } from '@/lib/format';
+import { formatDate, formatRupees, formatTime } from '@/lib/format';
 import { customerDisplayName, hasCustomerName } from '@/lib/customer';
 import { confirmDeleteQuotation, startEditingQuotation } from '@/lib/quotationActions';
 import { quotationToCartLines } from '@/lib/quotationDraft';
@@ -186,6 +186,7 @@ export default function QuotationScreen() {
           <View>
             <Text style={styles.label}>Date</Text>
             <Text style={styles.value}>{formatDate(quotation.date)}</Text>
+            <Text style={styles.muted}>{formatTime(quotation.date)}</Text>
           </View>
         </View>
 

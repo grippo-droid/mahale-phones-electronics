@@ -753,6 +753,44 @@ races serialise and a guard's behavioural test passes with the guard removed.
   The number is the customer's reference and may already be on a printed copy;
   the date decides which GST return period the sale falls in, so moving it would
   refile the sale in a different month. Only the contents change.
+- **Four different dates live on a bill, and only one of them is "the date".**
+  Worth naming them, because three of the four are plausible things to reach
+  for and all three are wrong on an invoice:
+
+    - `bills.date` — when the bill was raised. This is the document date, the
+      one that decides the GST return period, and the ONLY one any screen or
+      PDF labels "Date". Set once in `createBill` and never updated: `editBill`
+      deliberately omits it, and a bill made from a quotation is dated the day
+      of conversion rather than the quotation's day.
+    - `bills.edited_at` — when it was last corrected. Recorded so `bill_edits`
+      can be read back in a dispute; shown on no screen.
+    - `bill_payments.paid_on` — when money arrived. Belongs to the ledger, is
+      labelled there, and is nullable because migration 010 could not know it.
+    - The "As at" line on the PDF's payments block — when that copy was
+      printed. It is the only figure on the document that may legitimately
+      differ between two prints, which is why it says so in words.
+
+  **Dates are stored as ISO 8601 UTC and displayed in local time, so the two
+  disagree about which day it is for five and a half hours of every day.** A
+  sale at 11:45pm on 30 September is stored as `2026-09-30T18:15:00.000Z` —
+  same day here — but one at 00:15 on 30 September is stored as
+  `2026-09-29T18:45:00.000Z`, the day before. Anything that reads the date
+  portion of a stored string and compares it to a local day is therefore wrong
+  for the first five and a half hours of every date. That is why
+  `getSalesSummary` widens its bounds with `startOfLocalDay` / `endOfLocalDay`
+  instead of comparing dates, and why `formatDate` goes through `Date` rather
+  than slicing the string. The failure is invisible in testing and shows up as
+  an early-morning or late-evening sale counted in the wrong month's GST
+  figures. Both are pinned by `tests/suites/dates.test.js`, with negative
+  controls: removing the widening drops the sale from its own day's takings,
+  and slicing the string dates a 00:15 bill to the previous day.
+- **The day is shown everywhere; the TIME only where two of the same day need
+  telling apart.** Both PDFs, the Dashboard, History's sticky heading, the
+  quotations list and both detail screens carry the date. The time is on
+  History rows, the quotations list, and the two detail screens — but NOT on
+  History's heading, which is what the rows have in common, and not on the
+  PDFs, where a bill is identified by its number and the hour would only invite
+  questions about when the shop was open.
 - **Stock is adjusted by the DIFFERENCE, one statement per product.** Not "add
   the old quantities back, then take the new ones off": that passes through a
   value which is briefly wrong, and a failure between the two halves would leave

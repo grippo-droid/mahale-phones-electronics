@@ -25,7 +25,7 @@ import {
   type BillPayment,
   type NewPayment,
 } from '@/db/payments';
-import { formatDate, formatRupees } from '@/lib/format';
+import { formatDate, formatRupees, formatTime } from '@/lib/format';
 import { customerDisplayName, hasCustomerName } from '@/lib/customer';
 import { rupeesInWords } from '@/lib/numberToWords';
 import { formatQuantityWithUnit } from '@/lib/units';
@@ -298,7 +298,12 @@ export default function BillResultScreen() {
             </View>
             <View>
               <Text style={styles.label}>Date</Text>
+              {/* The date is what the bill is filed under; the time is how
+                  the owner tells today's three bills apart. Neither moves
+                  after the bill is raised -- an edit keeps both, and a
+                  payment carries its own date in the ledger below. */}
               <Text style={styles.value}>{formatDate(bill.date)}</Text>
+              <Text style={styles.muted}>{formatTime(bill.date)}</Text>
             </View>
           </View>
 
