@@ -27,6 +27,7 @@ import {
   summariseBills,
   type SalesSummary,
 } from '@/db/bills';
+import { billAmountDisplay, type BillAmount } from '@/lib/billAmount';
 import {
   buildHistorySections,
   buildPendingGroup,
@@ -98,7 +99,7 @@ export default function HistoryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Bill ids with a paid/not-paid write in flight, so a tag cannot be double-tapped. */
-  const { loadFor, amountsFor, stateFor, outstandingFor, tapTag, settling } = useBillPayments();
+  const { loadFor, amountsFor, stateFor, tapTag, settling } = useBillPayments();
 
   /**
    * Guards against an older query landing after a newer one.
@@ -204,6 +205,21 @@ export default function HistoryScreen() {
    * claiming something the database does not agree with. Money is exactly the
    * wrong thing to be optimistic about and then quiet.
    */
+  /**
+   * What is actually still owed, oldest first.
+   *
+   * Keyed on the ledgers, so settling a bill from the list drops it out of the
+   * group under the owner's finger rather than at the next reload. The row
+   * jumping away IS the confirmation that the tap landed.
+   */
+  const owed = useMemo<PendingBill[]>(
+    () => buildPendingGroup(candidates, amountsFor),
+    [candidates, amountsFor]
+  );
+
+  /** The ids in that group, for the row and dialog that render differently. */
+  const owedIds = useMemo(() => new Set(owed.map((e) => e.bill.id)), [owed]);
+
   const tapPaidTag = useCallback(
     (bill: BillRow) => tapTag(bill, setError),
     [tapTag]
@@ -220,7 +236,14 @@ export default function HistoryScreen() {
     (bill: BillRow) => {
       Alert.alert(
         bill.invoice_number,
-        `${customerDisplayName(bill.customer_name)} · ${formatRupees(bill.grand_total)}`,
+        // Through the same function the row renders from. T9.8 changed the
+        // visible figure on an owed row and left this one reading the full
+        // total, so the dialog contradicted the row it was opened from.
+        `${customerDisplayName(bill.customer_name)} · ${
+          billAmountDisplay(bill, amountsFor(bill.id), {
+            underOwedHeading: owedIds.has(bill.id),
+          }).speech
+        }`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -259,7 +282,7 @@ export default function HistoryScreen() {
         ]
       );
     },
-    []
+    [amountsFor, owedIds]
   );
 
   /**
@@ -288,18 +311,6 @@ export default function HistoryScreen() {
     setSearch('');
     setRange('all');
   }, []);
-
-  /**
-   * What is actually still owed, oldest first.
-   *
-   * Keyed on the ledgers, so settling a bill from the list drops it out of the
-   * group under the owner's finger rather than at the next reload. The row
-   * jumping away IS the confirmation that the tap landed.
-   */
-  const owed = useMemo<PendingBill[]>(
-    () => buildPendingGroup(candidates, amountsFor),
-    [candidates, amountsFor]
-  );
 
   /** The owed group, then everything else under its day headings. */
   const sections = useMemo(() => buildHistorySections(bills, owed), [bills, owed]);
@@ -398,7 +409,9 @@ export default function HistoryScreen() {
               state={stateFor(item)}
               onShowActions={showActions}
               busy={settling.has(item.id)}
-              owed={section.owed ? outstandingFor(item) : null}
+              amount={billAmountDisplay(item, amountsFor(item.id), {
+                underOwedHeading: section.owed,
+              })}
             />
           )}
           ListEmptyComponent={
@@ -440,22 +453,22 @@ function BillRowItem({
   state,
   onShowActions,
   busy,
-  owed,
+  amount,
 }: {
   bill: BillRow;
   onTogglePaid: (bill: BillRow) => void;
   state: PaidState;
   onShowActions: (bill: BillRow) => void;
   busy: boolean;
-  /** Rupees still owed, when this row is in the owed group. Null everywhere else. */
-  owed: number | null;
+  /** What the amount slot shows -- and what the label announces. One decision. */
+  amount: BillAmount;
 }) {
   return (
     <Pressable
       style={({ pressed }) => [styles.billRow, pressed && styles.billRowPressed]}
       onPress={() => router.push({ pathname: '/bill/[id]', params: { id: String(bill.id) } })}
       accessibilityRole="button"
-      accessibilityLabel={`Bill ${bill.invoice_number} for ${customerDisplayName(bill.customer_name)}, ${formatRupees(bill.grand_total)}. Opens the bill.`}>
+      accessibilityLabel={`Bill ${bill.invoice_number} for ${customerDisplayName(bill.customer_name)}, ${amount.speech}. Opens the bill.`}>
       <View style={styles.billMain}>
         <Text style={styles.billCustomer} numberOfLines={1}>
           {customerDisplayName(bill.customer_name)}
@@ -467,7 +480,7 @@ function BillRowItem({
             the row shows only the time. */}
         <Text style={styles.billMeta} numberOfLines={1}>
           {bill.invoice_number} ·{' '}
-          {owed !== null
+          {amount.isBalance
             ? `${formatBillDay(bill.date)}, ${formatTime(bill.date)}`
             : formatTime(bill.date)}
         </Text>
@@ -488,13 +501,13 @@ function BillRowItem({
           silently change what the number means, and the summary above still
           adds up grand totals -- so an unlabelled balance would read as the
           row and the header disagreeing. */}
-      {owed !== null ? (
+      {amount.label !== null ? (
         <View style={styles.billAmount}>
-          <Text style={styles.billOwed}>{formatRupees(owed)}</Text>
-          <Text style={styles.billOwedLabel}>owed</Text>
+          <Text style={styles.billOwed}>{formatRupees(amount.amount)}</Text>
+          <Text style={styles.billOwedLabel}>{amount.label}</Text>
         </View>
       ) : (
-        <Text style={styles.billTotal}>{formatRupees(bill.grand_total)}</Text>
+        <Text style={styles.billTotal}>{formatRupees(amount.amount)}</Text>
       )}
 
       {/* An overflow tap target rather than swipe actions: swipe needs a

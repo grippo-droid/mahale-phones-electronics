@@ -298,7 +298,14 @@ async function run({ check, section }) {
     /loadFor\(\[\.\.\.candidates\.map/.test(history), true);
   check('deleting drops it from the owed group too',
     /setCandidates\(\(current\) => current\.filter/.test(history), true);
-  check('the balance is labelled', history.includes('owed</Text>'), true);
+  // The label moved into lib/billAmount.ts in T9.9, so this no longer looks
+  // for the word here -- it asserts the row renders whatever that one
+  // decision returns, which is the stronger claim. `bill-amount` covers the
+  // wording itself.
+  check('the balance carries a label',
+    /<Text style=\{styles\.billOwedLabel\}>\{amount\.label\}<\/Text>/.test(history), true);
+  check('and the owed row is driven by the shared decision',
+    /underOwedHeading: section\.owed/.test(history), true);
 
   section('the tag reads the bill, so credit sales stop saying "Not recorded"');
   check('History passes the bill', /state=\{stateFor\(item\)\}/.test(history), true);

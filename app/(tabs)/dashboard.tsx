@@ -23,6 +23,7 @@ import { countLowStockProducts, countProducts } from '@/db/products';
 import { getLastBackupAt } from '@/db/settings';
 import { describeBackupStatus } from '@/lib/backupStatus';
 import { formatBillWhen, formatRupees } from '@/lib/format';
+import { billAmountDisplay, type BillAmount } from '@/lib/billAmount';
 import { selectItemCount, useCartStore } from '@/store/cart';
 import { selectBusiness, useSettingsStore } from '@/store/settings';
 
@@ -64,7 +65,7 @@ export default function DashboardScreen() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<BillRow[]>([]);
   /** Bill ids with a paid/not-paid write in flight, so a tag cannot be double-tapped. */
-  const { loadFor, stateFor, tapTag, settling } = useBillPayments();
+  const { loadFor, amountsFor, stateFor, tapTag, settling } = useBillPayments();
   const [paidError, setPaidError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -283,6 +284,7 @@ export default function DashboardScreen() {
               onTogglePaid={tapPaidTag}
               state={stateFor(row)}
               busy={settling.has(row.id)}
+              amount={billAmountDisplay(row, amountsFor(row.id))}
             />
           ))
         )}
@@ -301,18 +303,21 @@ function RecentBillRow({
   onTogglePaid,
   state,
   busy,
+  amount,
 }: {
   bill: BillRow;
   onTogglePaid: (bill: BillRow) => void;
   state: PaidState;
   busy: boolean;
+  /** What the amount slot shows -- and what the label announces. One decision. */
+  amount: BillAmount;
 }) {
   return (
     <Pressable
       style={({ pressed }) => [styles.billRow, pressed && styles.billRowPressed]}
       onPress={() => router.push({ pathname: '/bill/[id]', params: { id: String(bill.id) } })}
       accessibilityRole="button"
-      accessibilityLabel={`Bill ${bill.invoice_number} for ${customerDisplayName(bill.customer_name)}, ${formatRupees(bill.grand_total)}`}>
+      accessibilityLabel={`Bill ${bill.invoice_number} for ${customerDisplayName(bill.customer_name)}, ${amount.speech}`}>
       <View style={styles.billMain}>
         <Text style={styles.billCustomer} numberOfLines={1}>
           {customerDisplayName(bill.customer_name)}
@@ -331,7 +336,20 @@ function RecentBillRow({
           busy={busy}
         />
       </View>
-      <Text style={styles.billTotal}>{formatRupees(bill.grand_total)}</Text>
+      {/* A part-paid bill shows what is left, and names the total beside it.
+          Unlike History's owed group there is no heading here saying these are
+          debts -- the row sits among ordinary recent bills -- so a bare ₹400 on
+          a ₹900 bill would read as the price. Not Paid and Paid rows are
+          untouched: an unpaid bill owes its whole total, so the total is
+          already the right figure. */}
+      {amount.label !== null ? (
+        <View style={styles.billAmount}>
+          <Text style={styles.billOwed}>{formatRupees(amount.amount)}</Text>
+          <Text style={styles.billOwedLabel}>{amount.label}</Text>
+        </View>
+      ) : (
+        <Text style={styles.billTotal}>{formatRupees(amount.amount)}</Text>
+      )}
       <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
     </Pressable>
   );
@@ -397,6 +415,17 @@ const styles = StyleSheet.create({
   billCustomer: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.text },
   billMeta: { fontSize: FontSizes.small, color: Colors.textMuted },
   billTotal: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text, fontVariant: ['tabular-nums'] },
+
+  // The same two-line amount History uses for an owed row, and the same
+  // amber: money still to come is worth attention, not a fault.
+  billAmount: { alignItems: 'flex-end' },
+  billOwed: {
+    fontSize: FontSizes.body,
+    fontWeight: '700',
+    color: Colors.lowStock,
+    fontVariant: ['tabular-nums'],
+  },
+  billOwedLabel: { fontSize: FontSizes.small, color: Colors.textMuted },
 
   lowBanner: {
     flexDirection: 'row',

@@ -1026,6 +1026,24 @@ races serialise and a guard's behavioural test passes with the guard removed.
   disagreeing. Owed rows also carry their own DAY, because the group's heading
   is not a date; everywhere else the day heading has it and the row shows only
   the time.
+- **A bill row's amount is ONE decision, in `lib/billAmount.ts`, and three
+  things render it** (T9.9): the visible figure, the accessibility label and
+  History's edit/delete dialog. They are kept together because they already
+  came apart once — T9.8 changed the owed row to show the balance and left both
+  the label a screen reader announces and the dialog body reading the full
+  total. Nothing looked wrong, because the two that were wrong are the two
+  nobody sees. `speech` is the single-line form those two use, and it always
+  names the bill's total, since neither has a heading or a column beside it to
+  give a bare figure context.
+- **Only a PART-paid bill has its figure swapped.** Not Paid keeps the total —
+  an unpaid bill owes all of it, so the total is already the right number and
+  an "owed" label on an identical figure is noise. Paid keeps the total and its
+  tag. `unknown` is not a debt and is left alone.
+- **The Dashboard names the total; History's owed group does not.** "₹400 owed
+  of ₹900" on the Dashboard, because that row sits among ordinary recent bills
+  with nothing to say it is a debt, and a bare ₹400 on a ₹900 bill reads as the
+  price. Under History's "Money owed" heading the label is the bare word, since
+  the heading carries the rest. Same function, one flag (`underOwedHeading`).
 - **`bill_payments.paid_on` is NULLABLE, and that nullability is the whole of
   what the migration knows.** A bill already marked paid recorded a real fact:
   settled, in full. The AMOUNT is therefore knowable — the grand total — but the
