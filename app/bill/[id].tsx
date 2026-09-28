@@ -21,10 +21,10 @@ import {
   editPayment,
   listPayments,
   recordPayment,
-  totalsFor,
   type BillPayment,
   type NewPayment,
 } from '@/db/payments';
+import { billSettlement } from '@/lib/payment';
 import { formatDate, formatRupees, formatTime } from '@/lib/format';
 import { customerDisplayName, hasCustomerName } from '@/lib/customer';
 import { rupeesInWords } from '@/lib/numberToWords';
@@ -313,7 +313,7 @@ export default function BillResultScreen() {
               a bill without saying where the money is. */}
           <PaymentTags
             paymentType={bill.payment_type}
-            state={totalsFor(bill.grand_total, payments).state}
+            state={billSettlement(bill, payments.map((p) => p.amount)).state}
           />
 
           <View style={styles.divider} />

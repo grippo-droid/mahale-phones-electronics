@@ -3,7 +3,10 @@ import { useCallback, useState } from 'react';
 
 import { listPaymentsForBills, settleRemaining, type BillPayment } from '@/db/payments';
 import { deleteBillPdf } from '@/lib/pdf';
-import { paymentTotalsFor, tagTapAction, type PaidState } from '@/lib/payment';
+import { billSettlement, tagTapAction, type PaidState } from '@/lib/payment';
+
+/** What any of this needs from a bill: its id, its total, and whether anything was recorded. */
+export type BillSummary = { id: number; grand_total: number; paid: number | null };
 
 /**
  * The payment ledgers behind a list of bills, and what tapping a status tag does.
@@ -31,16 +34,26 @@ export function useBillPayments() {
     }
   }, []);
 
-  const stateFor = useCallback(
-    (billId: number, grandTotal: number): PaidState =>
-      paymentTotalsFor(grandTotal, (ledgers.get(billId) ?? []).map((p) => p.amount)).state,
+  /** The amounts held for one bill, which is what the pure helpers take. */
+  const amountsFor = useCallback(
+    (billId: number): number[] => (ledgers.get(billId) ?? []).map((p) => p.amount),
     [ledgers]
   );
 
+  /**
+   * Takes the BILL, not an id and a total, because `bills.paid` is needed to
+   * tell "recorded as unpaid" from "never recorded" — see `billSettlement`.
+   * Before this, every ordinary credit sale drew the outlined "Not recorded"
+   * pill although the owner had recorded it as unpaid when raising it.
+   */
+  const stateFor = useCallback(
+    (bill: BillSummary): PaidState => billSettlement(bill, amountsFor(bill.id)).state,
+    [amountsFor]
+  );
+
   const outstandingFor = useCallback(
-    (billId: number, grandTotal: number): number =>
-      paymentTotalsFor(grandTotal, (ledgers.get(billId) ?? []).map((p) => p.amount)).outstanding,
-    [ledgers]
+    (bill: BillSummary): number => billSettlement(bill, amountsFor(bill.id)).outstanding,
+    [amountsFor]
   );
 
   /**
@@ -56,12 +69,15 @@ export function useBillPayments() {
    */
   const tapTag = useCallback(
     async (
-      bill: { id: number; invoice_number: string; grand_total: number },
+      bill: BillSummary & { invoice_number: string },
       onError: (message: string) => void
     ) => {
       const current = ledgers.get(bill.id) ?? [];
-      const { state, outstanding } = paymentTotalsFor(
-        bill.grand_total,
+      // Through the same definition the tag was drawn from. Reading the state
+      // one way to render it and another way to decide what tapping it does is
+      // how a tag starts disagreeing with itself.
+      const { state, outstanding } = billSettlement(
+        bill,
         current.map((p) => p.amount)
       );
 
@@ -110,5 +126,5 @@ export function useBillPayments() {
     [ledgers]
   );
 
-  return { ledgers, loadFor, stateFor, outstandingFor, tapTag, settling };
+  return { ledgers, loadFor, amountsFor, stateFor, outstandingFor, tapTag, settling };
 }

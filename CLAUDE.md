@@ -941,6 +941,91 @@ races serialise and a guard's behavioural test passes with the guard removed.
   truth once nothing consults it, and keeping the column means an older backup
   restores into this schema unchanged and is then migrated forward by exactly
   migration 010.
+- **`bills.paid` is read again, for ONE fact: whether anything was ever
+  recorded.** The note above said it was no longer read at all; T9.8 reversed
+  that deliberately and narrowly, and this records why so it is not "tidied"
+  back.
+
+  `createBill` seeds a ledger row only when a bill is saved as paid, so every
+  ordinary CREDIT sale is written with an empty ledger — and an empty ledger
+  alone is `unknown`, the same as a bill raised years before any of this
+  existed. Two different things read identically: the owner recording "not
+  paid" at the moment of sale, and nobody ever having said anything. So every
+  credit bill drew the outlined "Not recorded" pill, and anything asking who
+  owes money found nothing, because the bills it was for were all in the one
+  state it could not count.
+
+  `bills.paid` separates them and is the only thing that can: `0` means it was
+  recorded as unpaid, NULL means nothing was ever recorded, which is the truth
+  for every bill predating migration 006. That is exactly what
+  `paymentTotalsFor`'s `hasEverRecorded` expresses.
+
+  **The principle is intact.** `paid` is still not the status — the ledger
+  remains the only record of how much came in, and nothing stores a status.
+  It is read for the one fact the ledger genuinely cannot hold: that the
+  question was answered at all. `billSettlement` in `lib/payment.ts` is the
+  single place that does it, and every status tag goes through it — History,
+  the Dashboard and the bill screen — so a bill cannot read "Not Paid" in a
+  list and "Not recorded" when opened.
+- **History lifts what is owed to the top, oldest first** (T9.8). One extra
+  group above the day headings, so the question "who owes me, and for how
+  long" is answered by the screen the owner already opens rather than a second
+  one to remember.
+
+  **Scoped by outstanding balance, not by payment type.** The ledger takes any
+  amount against any bill, so a part-paid CASH sale is money owed too;
+  restricting the group to credit bills would be an invisible rule in the one
+  view that exists to answer that question. `unknown` is never owed — a bill
+  nobody recorded anything about is not a debt.
+
+  **Oldest first, and the tie breaks the opposite way from the rest of the
+  list.** Two bills at the same instant show newest-first in the dated part;
+  here the lower id is the older bill and goes on top. Both orderings say the
+  same thing — the top of this group is the oldest debt.
+- **SQL finds the candidates; TypeScript decides which are owed.** Settlement
+  has one definition, `paymentTotalsFor`, comparing whole paise as integers.
+  SQLite is not exempt from the reason that exists: it sums ₹185.01 + ₹315.03
+  to `500.03999999999996`, strictly below the ₹500.04 bill they settle. Asking
+  it the settlement question would give the comparison a second definition,
+  and the way the two would disagree is a fully settled bill pinned to the top
+  of "Money owed" for ever, with no way to clear it from the screen.
+
+  So `listOutstandingCandidates` loosens its `HAVING` by a whole rupee — far
+  wider than any floating-point artefact, because the margin exists only to
+  guarantee no debt is missed — and `buildPendingGroup` makes the real call.
+  Over-including costs a few rows; under-including hides money owed.
+
+  Worth knowing: the ₹648 = ₹512.17 + ₹135.83 case from the ledger work does
+  NOT demonstrate this. SQLite sums that one exactly. The ₹500.04 case was
+  found by searching two-part splits, and it is the one in the suite.
+- **The grouping lives in `lib/billSections.ts`, not in the screen.** It was a
+  `useMemo` in `history.tsx`, where the harness cannot reach it — the same trap
+  as the `beginNew` guard, where a negative control passed because the test had
+  re-implemented the logic instead of calling it. CLAUDE.md claimed a test held
+  the day-heading invariant; there wasn't one, it went in the September sweep.
+
+  That invariant is real and this feature is what threatens it: a day must
+  never get two headings. Lifting bills OUT cannot cause it, but giving the
+  owed group day headings of its own can, and a negative control that does
+  exactly that slipped past the first version of the check — which only looked
+  at the dated sections and so could not see a day repeated across the two
+  groups. It now compares every heading in the list.
+- **The owed group is bounded by the same filter as the list and the summary.**
+  A bill owed from outside the chosen range would put rows on screen that the
+  count above them does not count, and History's heading would stop describing
+  its own list — the invariant `buildBillFilter` exists to hold. It is also
+  unpaged, deliberately: a truncated answer to "who owes me" is worse than a
+  long section, and in a shop this is tens of rows.
+- **Settling from the list moves the row out of the group at once.** The owed
+  group is derived from the ledgers, so the optimistic write that flips the tag
+  also re-sorts. The row leaving IS the confirmation the tap landed.
+- **The balance replaces the total on an owed row, and is LABELLED "owed".**
+  A smaller figure dropped into the slot the total occupies would silently
+  change what the number means, and the summary above still adds up grand
+  totals — so an unlabelled balance reads as the row and the header
+  disagreeing. Owed rows also carry their own DAY, because the group's heading
+  is not a date; everywhere else the day heading has it and the row shows only
+  the time.
 - **`bill_payments.paid_on` is NULLABLE, and that nullability is the whole of
   what the migration knows.** A bill already marked paid recorded a real fact:
   settled, in full. The AMOUNT is therefore knowable — the grand total — but the

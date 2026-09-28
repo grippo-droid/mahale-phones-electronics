@@ -21,7 +21,19 @@ import type { PaidState } from '@/lib/payment';
 import { customerDisplayName } from '@/lib/customer';
 import { confirmDeleteBill, startEditingBill } from '@/lib/billActions';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import { listBills, summariseBills, type SalesSummary } from '@/db/bills';
+import {
+  listBills,
+  listOutstandingCandidates,
+  summariseBills,
+  type SalesSummary,
+} from '@/db/bills';
+import {
+  buildHistorySections,
+  buildPendingGroup,
+  describeOwed,
+  totalOwed,
+  type PendingBill,
+} from '@/lib/billSections';
 import type { BillRow } from '@/db/schema';
 import { formatBillDay, formatRupees, formatTime } from '@/lib/format';
 import { describeRange, RANGE_OPTIONS, resolveRange, type RangeKey } from '@/lib/dateRanges';
@@ -54,14 +66,22 @@ const PAGE_SIZE = 30;
 /** Matches the Inventory search — a long list should not re-query per letter. */
 const SEARCH_DEBOUNCE_MS = 250;
 
-type Section = { title: string; data: BillRow[] };
-
 export default function HistoryScreen() {
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [range, setRange] = useState<RangeKey>('all');
 
   const [bills, setBills] = useState<BillRow[]>([]);
+  /**
+   * Bills that MIGHT still be owed on, for the whole filter rather than the
+   * loaded page. Not paged: a debt on page forty is a debt nobody sees, and
+   * the whole point of the group is that it cannot be scrolled past.
+   *
+   * These are candidates, not a verdict. The SQL that fetches them loosens
+   * its comparison rather than deciding settlement in floating point;
+   * `buildPendingGroup` makes the real call over the ledgers below.
+   */
+  const [candidates, setCandidates] = useState<BillRow[]>([]);
   const [summary, setSummary] = useState<SalesSummary | null>(null);
   /**
    * Covers the first load only, and never goes true again.
@@ -78,7 +98,7 @@ export default function HistoryScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Bill ids with a paid/not-paid write in flight, so a tag cannot be double-tapped. */
-  const { loadFor, stateFor, tapTag, settling } = useBillPayments();
+  const { loadFor, amountsFor, stateFor, outstandingFor, tapTag, settling } = useBillPayments();
 
   /**
    * Guards against an older query landing after a newer one.
@@ -90,6 +110,7 @@ export default function HistoryScreen() {
   const requestId = useRef(0);
   const loadedCount = useRef(0);
 
+
   useEffect(() => {
     const timer = setTimeout(() => setSearch(searchInput), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
@@ -100,15 +121,24 @@ export default function HistoryScreen() {
     const { from, to } = resolveRange(range);
 
     try {
-      const [rows, totals] = await Promise.all([
+      const [rows, totals, owedCandidates] = await Promise.all([
         listBills({ search, from, to, limit: PAGE_SIZE, offset: 0 }),
         summariseBills({ search, from, to }),
+        // Bounded by the SAME filter as the list and the summary. A bill owed
+        // from outside the chosen range appearing here would put rows on
+        // screen that the count above them does not count, and the heading
+        // would stop describing the list.
+        listOutstandingCandidates({ search, from, to }),
       ]);
       if (id !== requestId.current) return; // superseded by a newer query
 
       setBills(rows);
-      // One query for the whole page's ledgers, not one per row.
-      await loadFor(rows.map((row) => row.id));
+      setCandidates(owedCandidates);
+      // One query for every ledger on screen, not one per row. The candidates
+      // go in too: they are rendered above the page, and `loadFor` REPLACES
+      // what it holds rather than merging, so leaving them out would blank
+      // every tag in the owed group.
+      await loadFor([...owedCandidates.map((row) => row.id), ...rows.map((row) => row.id)]);
       setSummary(totals);
       loadedCount.current = rows.length;
       setReachedEnd(rows.length < PAGE_SIZE);
@@ -147,8 +177,10 @@ export default function HistoryScreen() {
         const all = [...current, ...rows];
         // Every row on screen, not just the new page: loadFor replaces what it
         // holds rather than merging, so passing only the new ids would drop the
-        // ledgers of everything already loaded and blank their tags.
-        void loadFor(all.map((row) => row.id));
+        // ledgers of everything already loaded and blank their tags. The owed
+        // group is above the page and is loaded from its own query, so its ids
+        // have to be re-passed here too or it goes blank on scroll.
+        void loadFor([...candidates.map((row) => row.id), ...all.map((row) => row.id)]);
         return all;
       });
       loadedCount.current += rows.length;
@@ -158,7 +190,7 @@ export default function HistoryScreen() {
     } finally {
       setLoadingMore(false);
     }
-  }, [search, range, loadingMore, reachedEnd, loading, loadFor]);
+  }, [search, range, loadingMore, reachedEnd, loading, loadFor, candidates]);
 
   /**
    * Marks a bill paid or not paid without leaving the list.
@@ -208,6 +240,9 @@ export default function HistoryScreen() {
                 // in a list the owner is working through.
                 () => {
                   setBills((current) => current.filter((row) => row.id !== bill.id));
+                  // Also out of the owed group, which is a separate list: a
+                  // deleted bill left there would keep asking to be collected.
+                  setCandidates((current) => current.filter((row) => row.id !== bill.id));
                   loadedCount.current = Math.max(0, loadedCount.current - 1);
                   setSummary((current) =>
                     current
@@ -254,21 +289,20 @@ export default function HistoryScreen() {
     setRange('all');
   }, []);
 
-  /** Consecutive bills on the same day collapse under one heading. */
-  const sections = useMemo<Section[]>(() => {
-    const out: Section[] = [];
-    let current: Section | null = null;
+  /**
+   * What is actually still owed, oldest first.
+   *
+   * Keyed on the ledgers, so settling a bill from the list drops it out of the
+   * group under the owner's finger rather than at the next reload. The row
+   * jumping away IS the confirmation that the tap landed.
+   */
+  const owed = useMemo<PendingBill[]>(
+    () => buildPendingGroup(candidates, amountsFor),
+    [candidates, amountsFor]
+  );
 
-    for (const bill of bills) {
-      const title = formatBillDay(bill.date);
-      if (!current || current.title !== title) {
-        current = { title, data: [] };
-        out.push(current);
-      }
-      current.data.push(bill);
-    }
-    return out;
-  }, [bills]);
+  /** The owed group, then everything else under its day headings. */
+  const sections = useMemo(() => buildHistorySections(bills, owed), [bills, owed]);
 
   const isFiltered = search.trim() !== '' || range !== 'all';
 
@@ -347,16 +381,24 @@ export default function HistoryScreen() {
           style={styles.list}
           contentContainerStyle={sections.length === 0 ? styles.emptyContent : styles.listContent}
           stickySectionHeadersEnabled
-          renderSectionHeader={({ section }) => (
-            <Text style={styles.dayHeading}>{section.title}</Text>
-          )}
-          renderItem={({ item }) => (
+          renderSectionHeader={({ section }) =>
+            section.owed ? (
+              <View style={styles.owedHeading}>
+                <Text style={styles.owedHeadingText}>{describeOwed(owed)}</Text>
+                <Text style={styles.owedHeadingTotal}>{formatRupees(totalOwed(owed))}</Text>
+              </View>
+            ) : (
+              <Text style={styles.dayHeading}>{section.title}</Text>
+            )
+          }
+          renderItem={({ item, section }) => (
             <BillRowItem
               bill={item}
               onTogglePaid={tapPaidTag}
-              state={stateFor(item.id, item.grand_total)}
+              state={stateFor(item)}
               onShowActions={showActions}
               busy={settling.has(item.id)}
+              owed={section.owed ? outstandingFor(item) : null}
             />
           )}
           ListEmptyComponent={
@@ -398,12 +440,15 @@ function BillRowItem({
   state,
   onShowActions,
   busy,
+  owed,
 }: {
   bill: BillRow;
   onTogglePaid: (bill: BillRow) => void;
   state: PaidState;
   onShowActions: (bill: BillRow) => void;
   busy: boolean;
+  /** Rupees still owed, when this row is in the owed group. Null everywhere else. */
+  owed: number | null;
 }) {
   return (
     <Pressable
@@ -415,8 +460,16 @@ function BillRowItem({
         <Text style={styles.billCustomer} numberOfLines={1}>
           {customerDisplayName(bill.customer_name)}
         </Text>
+        {/* In the owed group there is no day heading above the row -- the
+            heading there says what the group is -- so the row carries its own
+            day. That date is the point of the group: it is how long the money
+            has been outstanding. Everywhere else the day heading has it and
+            the row shows only the time. */}
         <Text style={styles.billMeta} numberOfLines={1}>
-          {bill.invoice_number} · {formatTime(bill.date)}
+          {bill.invoice_number} ·{' '}
+          {owed !== null
+            ? `${formatBillDay(bill.date)}, ${formatTime(bill.date)}`
+            : formatTime(bill.date)}
         </Text>
         {/* Tappable here, unlike the Dashboard: marking a bill paid is the
             reason the owner comes to this screen with a payment in hand, and
@@ -430,7 +483,19 @@ function BillRowItem({
           busy={busy}
         />
       </View>
-      <Text style={styles.billTotal}>{formatRupees(bill.grand_total)}</Text>
+      {/* The balance replaces the total in the owed group, and is LABELLED.
+          A smaller figure dropped into the slot the total occupies would
+          silently change what the number means, and the summary above still
+          adds up grand totals -- so an unlabelled balance would read as the
+          row and the header disagreeing. */}
+      {owed !== null ? (
+        <View style={styles.billAmount}>
+          <Text style={styles.billOwed}>{formatRupees(owed)}</Text>
+          <Text style={styles.billOwedLabel}>owed</Text>
+        </View>
+      ) : (
+        <Text style={styles.billTotal}>{formatRupees(bill.grand_total)}</Text>
+      )}
 
       {/* An overflow tap target rather than swipe actions: swipe needs a
           gesture dependency this app does not have, and a hidden gesture is
@@ -581,6 +646,49 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingTop: Spacing.md,
     paddingBottom: Spacing.xs,
+  },
+
+  /**
+   * The owed heading, tinted the Low stock / Not Paid amber.
+   *
+   * Amber rather than red for the reason the Not Paid tag is: an unpaid bill is
+   * ordinary business to chase, not a fault. Red stays for things that are
+   * wrong, like oversold stock. Opaque for the same reason the day heading is
+   * -- it sticks, and rows would otherwise scroll through its text.
+   */
+  owedHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.lowStockTint,
+    paddingHorizontal: Spacing.md,
+    paddingTop: Spacing.md,
+    paddingBottom: Spacing.xs,
+  },
+  owedHeadingText: {
+    fontSize: FontSizes.small,
+    fontWeight: '700',
+    color: Colors.lowStock,
+  },
+  owedHeadingTotal: {
+    fontSize: FontSizes.small,
+    fontWeight: '700',
+    color: Colors.lowStock,
+    fontVariant: ['tabular-nums'],
+  },
+
+  billAmount: {
+    alignItems: 'flex-end',
+  },
+  billOwed: {
+    fontSize: FontSizes.body,
+    fontWeight: '700',
+    color: Colors.lowStock,
+    fontVariant: ['tabular-nums'],
+  },
+  billOwedLabel: {
+    fontSize: FontSizes.small,
+    color: Colors.textMuted,
   },
 
   billRow: {

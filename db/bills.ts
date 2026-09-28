@@ -290,7 +290,20 @@ export async function getBillByInvoiceNumber(
  * and the way that shows up is a heading reading "42 bills" above a list of 38 —
  * which reads as bills having gone missing.
  */
-function buildBillFilter(options: BillListOptions): {
+function buildBillFilter(
+  options: BillListOptions,
+  /**
+   * Qualifier for the `bills` columns, e.g. `'b.'`.
+   *
+   * `listOutstandingCandidates` joins `bill_payments`, and both tables carry a
+   * `created_at`. Nothing here references that column today, so unqualified
+   * names happen to work — but "happens to work" is one added column away from
+   * an ambiguous-column error in the query the owner opens most. Qualifying is
+   * what keeps this ONE filter usable from both the plain reads and the join,
+   * which is the whole reason the count and the list cannot disagree.
+   */
+  prefix = ''
+): {
   clause: string;
   params: (string | number)[];
 } {
@@ -298,11 +311,13 @@ function buildBillFilter(options: BillListOptions): {
   // total through this one clause — `listBills` and `summariseBills` both build
   // their WHERE here, which is what keeps a History page and its own summary
   // describing the same set of rows.
-  const where: string[] = ['deleted_at IS NULL'];
+  const where: string[] = [`${prefix}deleted_at IS NULL`];
   const params: (string | number)[] = [];
 
   if (options.search?.trim()) {
-    const columns = ['customer_name', 'customer_phone', 'invoice_number'];
+    const columns = ['customer_name', 'customer_phone', 'invoice_number'].map(
+      (column) => `${prefix}${column}`
+    );
     const term = likeTerm(options.search);
     where.push(likeClause(columns));
     // One bound copy per expression, in the same order.
@@ -310,12 +325,12 @@ function buildBillFilter(options: BillListOptions): {
   }
 
   if (options.from) {
-    where.push('date >= ?');
+    where.push(`${prefix}date >= ?`);
     params.push(startOfLocalDay(options.from).toISOString());
   }
 
   if (options.to) {
-    where.push('date <= ?');
+    where.push(`${prefix}date <= ?`);
     params.push(endOfLocalDay(options.to).toISOString());
   }
 
@@ -341,6 +356,67 @@ export async function listBills(
   }
 
   return db.getAllAsync<BillRow>(sql, params);
+}
+
+/**
+ * A bill with what has been received against it, for the "Money owed" group.
+ *
+ * `paid_amount` and `payment_count` are the RAW aggregate, not a verdict. The
+ * verdict is `paymentTotalsFor`'s, in TypeScript — see below for why.
+ */
+export type OutstandingCandidate = BillRow & {
+  paid_amount: number;
+  payment_count: number;
+};
+
+/**
+ * Bills that MIGHT still be owed on, oldest first (T9.8).
+ *
+ * ---------------------------------------------------------------------------
+ * This query deliberately over-includes, and that is the whole design.
+ *
+ * Whether a bill is settled has exactly one definition — `paymentTotalsFor`,
+ * which compares whole paise as integers because summing REAL rupees does not
+ * land where arithmetic says. SQLite is not exempt: it sums ₹185.01 + ₹315.03
+ * to 500.03999999999996, strictly BELOW the ₹500.04 bill those two payments
+ * settle. Asking it the settlement question directly would give that
+ * comparison a SECOND definition, free to disagree with the first — and the
+ * way it would disagree is a fully settled bill pinned to the top of "Money
+ * owed" for ever, with nothing on screen to explain it and no way for the
+ * owner to clear it. That is the failure the paise rules exist to prevent,
+ * reintroduced one layer down.
+ *
+ * So SQL is not asked to decide. `HAVING` is loosened by a whole rupee — far
+ * wider than any floating-point artefact, deliberately, because the margin is
+ * only there to guarantee nothing owed is ever missed — and the real test then
+ * runs in TypeScript over the numbers this returns. Over-including is free:
+ * `buildPendingGroup` drops what does not qualify, and a few extra rows cost
+ * nothing. Under-including would be a debt that never appears on the screen
+ * built to show debts, which the owner has no way to discover.
+ *
+ * Not restricted to credit bills. The ledger takes any amount against any
+ * payment type, so a part-paid CASH sale is money owed too, and leaving it out
+ * would be an invisible rule in the one view that answers "who owes me".
+ * ---------------------------------------------------------------------------
+ */
+export async function listOutstandingCandidates(
+  options: BillListOptions = {},
+  db: SQLiteDatabase = getDatabase()
+): Promise<OutstandingCandidate[]> {
+  const { clause, params } = buildBillFilter(options, 'b.');
+
+  return db.getAllAsync<OutstandingCandidate>(
+    `SELECT b.*,
+            COALESCE(SUM(p.amount), 0) AS paid_amount,
+            COUNT(p.id)                AS payment_count
+       FROM bills b
+       LEFT JOIN bill_payments p ON p.bill_id = b.id
+      ${clause}
+      GROUP BY b.id
+     HAVING COALESCE(SUM(p.amount), 0) < b.grand_total + 1
+      ORDER BY b.date ASC, b.id ASC`,
+    params
+  );
 }
 
 /**

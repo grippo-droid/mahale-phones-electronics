@@ -117,6 +117,39 @@ export function paymentTotalsFor(
   return { paidAmount, outstanding, overpaidBy, state };
 }
 
+/**
+ * The settlement of one BILL — the only thing that should draw a status tag.
+ *
+ * ---------------------------------------------------------------------------
+ * This exists because an empty ledger is ambiguous and the ledger cannot
+ * resolve it on its own.
+ *
+ * `createBill` seeds a payment row only when the bill is saved as paid, so
+ * every ordinary CREDIT sale is written with an empty ledger — and
+ * `paymentTotalsFor` alone has to call that `unknown`, the same as a bill
+ * raised years before any of this existed. It read "Not recorded" when the
+ * owner had in fact recorded it, at the moment of sale, as not paid; and
+ * anything asking "who owes me money" found nothing, because the bills it
+ * exists for were all sitting in the one state it could not count.
+ *
+ * `bills.paid` settles it. It is NOT read as the status — the ledger remains
+ * the only thing that says how much came in, and a stored status would be free
+ * to disagree with the rows the moment an entry is edited. It is read for the
+ * one fact the ledger genuinely does not hold: whether anything was ever
+ * recorded at all. `0` means the owner said "not paid" when raising the bill;
+ * NULL means nobody ever said anything, which is the truth for every bill
+ * predating migration 006. That is exactly what `hasEverRecorded` expresses.
+ * ---------------------------------------------------------------------------
+ */
+export function billSettlement(
+  bill: { grand_total: number; paid: number | null },
+  amounts: number[]
+): PaymentTotals {
+  return paymentTotalsFor(bill.grand_total, amounts, {
+    hasEverRecorded: bill.paid !== null,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Entering a payment date
 // ---------------------------------------------------------------------------

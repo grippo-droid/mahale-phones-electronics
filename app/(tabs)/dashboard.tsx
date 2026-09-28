@@ -281,7 +281,7 @@ export default function DashboardScreen() {
               key={row.id}
               bill={row}
               onTogglePaid={tapPaidTag}
-              state={stateFor(row.id, row.grand_total)}
+              state={stateFor(row)}
               busy={settling.has(row.id)}
             />
           ))
