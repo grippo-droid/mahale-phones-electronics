@@ -44,3 +44,28 @@ example
 
 # Shop backups. Real customer and sales data — never commit these.
 *.mpebak
+
+# Stray personal files. This repository is on GitHub, and the working folder
+# collects things that have nothing to do with the app — a scanned form, a
+# screenshot sent over WhatsApp, an installer. None of them belong in the
+# history, and `git add -A` would take every one.
+#
+# Matched by TYPE rather than by name on purpose: a .gitignore listing
+# "GATE.pdf" and a dated WhatsApp image is itself a small disclosure, and it
+# would only cover the strays that have already turned up. Nothing of these
+# types is tracked -- the repository is source, PNGs under assets/, Markdown
+# under docs/ and JSON config -- so these patterns cost nothing.
+*.pdf
+*.exe
+*.msi
+*.ppt
+*.pptx
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.jpg
+*.jpeg
+*.zip
+*.rar
+*.7z
