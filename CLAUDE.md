@@ -196,6 +196,20 @@ the shim behave the way the real library does, watch the suite go red for the
 real reason, and only then fix the code. A green suite after a device bug means
 the harness is still lying.
 
+**`readSourceWithoutComments` was broken from the day it was written, and
+silently.** It split on LF, this repository is checked out with CRLF, so every
+line kept a trailing carriage return — and a dot in a JavaScript regex does not
+match one, because it counts as a line terminator. The trailing anchor could
+therefore never be reached and **no line comment was ever stripped, in any
+file**, while the helper looked like it was working.
+
+It was found by a new check searching for a `36` that existed only inside the
+comment explaining why 36 had been abandoned — the precise failure the helper
+exists to prevent, defeating the helper itself. Nothing in the suite had gone
+green falsely because of it (the suite passes either way), so this is a latent
+fix rather than a correction to a past result. T9.11 has a control that reverts
+the split and watches the check go red.
+
 **A check that cannot fail is worse than none, because it looks like cover.**
 Break the thing a new check protects and watch it go red before trusting it.
 Two real misses, both found exactly this way:
@@ -1281,6 +1295,38 @@ races serialise and a guard's behavioural test passes with the guard removed.
   and the field says so. A bigger one would make the taxable value negative,
   and negative GST cannot appear on a tax invoice. Warn, never block — as with
   overselling and overpaying.
+- **Which discount chip is selected is STATE, never derived from the stored
+  discount** (T9.11). It was `discount?.type ?? 'percent'`, and that made the ₹
+  chip unselectable until a number had been typed: tapping it emitted the
+  discount for the box as it stood, an empty box is no discount rather than a
+  discount of zero, so `onChange(null)` reached the store, `discount` came back
+  null, and the type fell to its `?? 'percent'` default. The chip re-rendered
+  as % and the tap looked ignored.
+
+  It only ever showed on ₹ because **'percent' is the fallback** — tapping %
+  did the same round trip and landed where it started, so nothing looked wrong.
+  Picking a type and giving an amount are two separate statements, and the
+  first has to survive the second being unanswered.
+
+  The prop is still followed when it genuinely carries a type (a stored
+  discount loading into an edited bill), through a last-seen tracker compared
+  during render — the T7.4 pattern. **Null is skipped explicitly**, because
+  following it is the bug.
+- **The typed amount is deliberately NOT synced back from the prop.** "5."
+  parses to 5, so echoing the stored number into the box would rewrite the
+  keystroke and make a decimal impossible to type. The type is synced; the text
+  is not.
+- **`discountFromInput` lives in `lib/gst.ts`**, so the "empty box means no
+  discount" rule is testable without a renderer. That rule is correct and
+  unchanged — what changed is that the component no longer reads the selected
+  type back out of its result.
+- **The chips are a real 48dp, not 36 with `hitSlop`.** They sit `Spacing.xs`
+  apart, so the 6dp of slop each would need to reach 48 overlaps by 8dp in the
+  middle — an ambiguous strip where one chip can take the other's tap, which is
+  the same shape as the bug being fixed. The clear button grew with them and
+  lost its slop for the mirror reason: 48 plus slop reaches back over the
+  amount box, so tapping the end of the field could clear the discount instead
+  of placing the cursor.
 - **Visible in the app, invisible on both documents.** The owner sees what came
   off which line, on which bill, at any time later. The customer sees a price.
   This needed no change to either template: both already derive the rate from

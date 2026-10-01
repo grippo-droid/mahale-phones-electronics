@@ -64,7 +64,18 @@ function readSourceWithoutComments(relativePath) {
   const NEWLINE = String.fromCharCode(10);
   return readSource(relativePath)
     .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split(NEWLINE)
+    // Split on CRLF as well as LF. This repository is checked out with CRLF
+    // endings, and splitting on LF alone left a carriage return at the end of
+    // every line -- which silently defeated the line-comment strip below,
+    // because a dot in a JavaScript regex does not match a carriage return
+    // (it counts as a line terminator), so the trailing anchor could never be
+    // reached.
+    //
+    // The effect: NO line comment was ever stripped, in any file, while this
+    // function looked like it was doing its job. That is the exact failure it
+    // exists to prevent -- three checks had already matched the comment
+    // explaining why something was avoided rather than the thing itself.
+    .split(/\r?\n/)
     .map((line) => line.replace(/(^|\s)\/\/.*$/, '$1'))
     .join(NEWLINE);
 }

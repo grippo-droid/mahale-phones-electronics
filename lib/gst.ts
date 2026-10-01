@@ -62,6 +62,27 @@ export function discountAmountFor(lineGross: number, discount: LineDiscount | nu
 }
 
 /** True when the discount asked for was more than the line could give. */
+/**
+ * What a typed box is worth, given the chip that is selected (T9.11).
+ *
+ * An empty, blank or unreadable box is NO discount rather than a discount of
+ * zero — clearing the amount has to clear the discount, or a line would keep a
+ * figure the owner has just deleted.
+ *
+ * It lives here rather than inside `DiscountField` because it is the rule the
+ * ₹ chip tripped over: the component called this, got null for an empty box,
+ * and then re-derived the selected type FROM that null — so picking ₹ before
+ * typing a number reset itself to %. Returning null is correct and stays; what
+ * changed is that the component no longer reads the type back out of it.
+ */
+export function discountFromInput(
+  type: DiscountType,
+  raw: string
+): LineDiscount | null {
+  const value = Number.parseFloat(raw);
+  return Number.isFinite(value) && value > 0 ? { type, value } : null;
+}
+
 export function isDiscountClamped(
   lineGross: number,
   discount: LineDiscount | null | undefined
