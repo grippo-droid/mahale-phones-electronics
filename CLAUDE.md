@@ -629,6 +629,55 @@ races serialise and a guard's behavioural test passes with the guard removed.
   `styles.listContent` (bottom padding to clear the bar and the buttons below
   it). A horizontal `ScrollView` in a column needs `flexGrow: 0` for the
   mirror-image reason — otherwise it claims vertical space it does not need.
+- **Anything anchored to the bottom edge must ADD `useSafeAreaInsets().bottom`,
+  and `TAB_BAR_HEIGHT` is never the whole height** (T9.10). Android draws this
+  app edge to edge, so the system navigation bar is painted over the bottom of
+  the screen — roughly 16–24dp on gesture navigation, around 48dp on three
+  buttons.
+
+  **React Navigation handles this by itself, and `tabBarStyle` overrode it
+  twice.** Both escapes are in the vendored
+  `expo-router/build/react-navigation/bottom-tabs/views/BottomTabBar.js`:
+
+    - `getTabBarHeight` returns a numeric `height` taken from the style
+      *before* it reaches the line that adds the inset. So `height: 60` meant
+      exactly 60, system bar included.
+    - `tabBarStyle` is applied LAST in the tab bar's style array, so a literal
+      `paddingBottom` replaces the computed `paddingBottom: insets.bottom`.
+
+  Taking either escape is enough to break it; the tab bar took both, and up to
+  ~48dp of a 60dp bar sat under the system buttons with the icons clipped.
+
+  **Nothing was missing.** `SafeAreaProvider` is mounted by expo-router's own
+  `ExpoRoot`, and `react-native-safe-area-context` is installed — the insets
+  were available the whole time and were being discarded. Worth knowing before
+  anyone adds a provider that is already there.
+
+  **The height is kept explicit on purpose.** The library default is 49; 60 is
+  a deliberate choice for the app's most-used control, so the inset is added in
+  the layout rather than handing sizing back to the library.
+- **The same mistake was in `components/Toast.tsx`, and that is why the
+  constant is shared.** It carried its own `TAB_BAR_CLEARANCE = 64`, "roughly
+  the tab bar's height" — but once the bar is `60 + inset` it stands around
+  108dp, so the banner whose entire purpose is to not cover the tabs would have
+  sat on them. Both sites now read `TAB_BAR_HEIGHT` from `constants/theme.ts`
+  and add the inset themselves. It cannot use `useBottomTabBarHeight()`: it is
+  mounted in the ROOT layout, outside the `Tabs` navigator, so that hook has no
+  context to read.
+- **What the harness can and cannot say about this.** There is no renderer, so
+  `tests/suites/safe-area.test.js` cannot measure a bar or tell you anything is
+  clipped — only a build settles that. What it holds is the textual shape of
+  the mistake, which was made twice: that both bottom-anchored files call
+  `useSafeAreaInsets`, that the tab bar adds the inset to BOTH height and
+  padding (fixing one and not the other is a real half-fix, and has its own
+  control), and that neither 60 nor 64 reappears as a bare literal.
+
+  The `toast` suite used to assert `TAB_BAR_CLEARANCE` appeared in the source.
+  Repointing it at `TAB_BAR_HEIGHT` looked right and was vacuous — a control
+  deleting the offset outright still passed, because the identifier survives in
+  the import line. It was removed rather than propped up: the `safe-area` suite
+  already owns the arithmetic, and a weaker copy of an existing check is worse
+  than none because it looks like coverage.
 - **"Frequently sold" is ranked by UNITS, over 90 days, top 12.** Units rather
   than bill count: the list exists to save taps at a counter, and that is
   decided by what moves in volume — ten bulbs on one bill beats one camera on

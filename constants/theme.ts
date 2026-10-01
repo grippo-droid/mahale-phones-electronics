@@ -53,3 +53,31 @@ export const FontSizes = {
   title: 20,
   heading: 28,
 } as const;
+
+/**
+ * The tab bar's own height, BEFORE the device's bottom inset is added.
+ *
+ * ---------------------------------------------------------------------------
+ * Taller than React Navigation's default of 49, deliberately: this is the
+ * control the owner uses most and the one most often tapped one-handed
+ * mid-sale.
+ *
+ * **It is never the whole height, and nothing may treat it as such.** Android
+ * draws the app edge to edge, so the system's own navigation bar sits over the
+ * bottom of the screen — roughly 16-24dp on gesture navigation and around 48dp
+ * on three buttons. Whatever uses this must add `useSafeAreaInsets().bottom`
+ * itself.
+ *
+ * That is the whole reason this is a shared constant rather than two literals.
+ * It was `height: 60` in the tab layout and a separate `64` in the toast, and
+ * BOTH were wrong in the same way — the tab bar's bottom rows sat under the
+ * system bar, and the toast that exists to clear the tab bar would have landed
+ * on top of it once the bar grew. One of them being corrected and the other
+ * forgotten is exactly the drift the palette and the category chips already
+ * taught.
+ * ---------------------------------------------------------------------------
+ */
+export const TAB_BAR_HEIGHT = 60;
+
+/** The gap between the toast and the top of the tab bar. */
+export const TOAST_GAP = 4;

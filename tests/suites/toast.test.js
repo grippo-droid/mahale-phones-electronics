@@ -66,7 +66,14 @@ async function run({ check, section }) {
   section('the banner itself');
   const toast = readSource('components/Toast.tsx');
   check('it never takes a touch', toast.includes('pointerEvents="none"'), true);
-  check('it sits above the tab bar', toast.includes('TAB_BAR_CLEARANCE'), true);
+  // Where it sits relative to the tab bar is checked by the `safe-area`
+  // suite, not here. This file used to assert `TAB_BAR_CLEARANCE` appeared
+  // in the source; T9.10 replaced that constant with the shared
+  // TAB_BAR_HEIGHT plus the device's inset, and the obvious repoint --
+  // looking for TAB_BAR_HEIGHT -- turned out to pass with the offset
+  // deleted outright, because the identifier survives in the import line.
+  // A weaker copy of a check that already exists is worse than no copy,
+  // because it looks like coverage.
   check('it is announced to a screen reader',
     toast.includes('accessibilityLiveRegion="polite"'), true);
   check('its timer is keyed to the toast id', /\[id, dismiss\]/.test(toast), true);

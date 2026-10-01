@@ -1,8 +1,9 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, FontSizes, Spacing } from '@/constants/theme';
+import { Colors, FontSizes, Spacing, TAB_BAR_HEIGHT, TOAST_GAP } from '@/constants/theme';
 import { useToastStore } from '@/store/toast';
 
 /**
@@ -27,12 +28,26 @@ import { useToastStore } from '@/store/toast';
 /** Long enough to read a product name at a counter, short enough not to linger. */
 const VISIBLE_MS = 3500;
 
-/** Roughly the tab bar's height, so the banner sits above it rather than on it. */
-const TAB_BAR_CLEARANCE = 64;
 
 export default function Toast() {
   const toast = useToastStore((state) => state.toast);
   const dismiss = useToastStore((state) => state.dismiss);
+
+  /**
+   * How far the tab bar reaches up the screen, so the banner clears it.
+   *
+   * This used to be a flat 64 — "roughly the tab bar's height" — which was
+   * wrong for the same reason the tab bar itself was. The bar is
+   * `TAB_BAR_HEIGHT + insets.bottom`, so on three-button navigation it stands
+   * around 108dp and a banner at 64 would have landed ON the tabs: precisely
+   * what the clearance exists to prevent, in the one component whose job is to
+   * not cover them.
+   *
+   * `useBottomTabBarHeight()` would be the direct way to ask, but this is
+   * mounted in the root layout, OUTSIDE the Tabs navigator, so that hook has no
+   * context to read. The inset is the honest source here.
+   */
+  const insets = useSafeAreaInsets();
 
   const id = toast?.id;
 
@@ -47,7 +62,9 @@ export default function Toast() {
   const failed = toast.tone === 'error';
 
   return (
-    <View style={styles.wrapper} pointerEvents="none">
+    <View
+      style={[styles.wrapper, { bottom: TAB_BAR_HEIGHT + TOAST_GAP + insets.bottom }]}
+      pointerEvents="none">
       <View style={[styles.toast, failed && styles.toastError]}>
         <Ionicons
           name={failed ? 'alert-circle' : 'checkmark-circle'}
@@ -68,7 +85,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: TAB_BAR_CLEARANCE,
+    // `bottom` is set inline: it depends on the device's inset.
     paddingHorizontal: Spacing.md,
     alignItems: 'center',
   },
