@@ -74,6 +74,14 @@ export default function RootLayout() {
             quotation loaded and stayed that way if it was not found. */}
         <Stack.Screen name="quotation/new" options={{ title: 'New Quotation' }} />
         <Stack.Screen name="quotation/[id]" options={{ title: 'Quotation' }} />
+        {/* The purchase side. Both dynamic routes set their own title once
+            they know what they are showing, but a dynamic route with NO entry
+            here falls back to the route name — so the header would read "[id]"
+            while a vendor loaded, and stay that way if it had been removed. */}
+        <Stack.Screen name="vendors/index" options={{ title: 'Vendors' }} />
+        <Stack.Screen name="vendors/[id]" options={{ title: 'Vendor' }} />
+        <Stack.Screen name="purchase/new" options={{ title: 'Record a Purchase' }} />
+        <Stack.Screen name="purchase/[id]" options={{ title: 'Purchase' }} />
       </Stack>
 
       {/* Mounted once, above every screen, because several actions report on a

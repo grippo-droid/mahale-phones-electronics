@@ -22,6 +22,7 @@ import type { BillRow } from '@/db/schema';
 import { countLowStockProducts, countProducts } from '@/db/products';
 import { getLastBackupAt } from '@/db/settings';
 import { describeBackupStatus } from '@/lib/backupStatus';
+import { totalOwedToVendors } from '@/db/vendors';
 import { formatBillWhen, formatRupees } from '@/lib/format';
 import { billAmountDisplay, type BillAmount } from '@/lib/billAmount';
 import { selectItemCount, useCartStore } from '@/store/cart';
@@ -51,6 +52,8 @@ type Stats = {
   lastBackupAt: string | null;
   /** Whether there is anything worth backing up yet. */
   hasData: boolean;
+  /** What is still owed to every vendor put together (T10.3). */
+  vendorsOwed: number;
 };
 
 /** Midnight on the first of the current month, in local time. */
@@ -94,7 +97,8 @@ export default function DashboardScreen() {
   const load = useCallback(async () => {
     try {
       const now = new Date();
-      const [today, month, lowStock, recentBills, lastBackupAt, productCount] = await Promise.all([
+      const [today, month, lowStock, recentBills, lastBackupAt, productCount, owedToVendors] =
+        await Promise.all([
         // Both ends are today: getSalesSummary widens them to the local day, so
         // a bill raised at 9pm counts towards that evening and not tomorrow.
         getSalesSummary(now, now),
@@ -103,6 +107,7 @@ export default function DashboardScreen() {
         getRecentBills(RECENT_BILL_COUNT),
         getLastBackupAt(),
         countProducts(),
+        totalOwedToVendors(),
       ]);
 
       setStats({
@@ -116,6 +121,7 @@ export default function DashboardScreen() {
         // recentBills rather than the month total — a shop whose last sale was
         // in December still has everything to lose in January.
         hasData: productCount > 0 || recentBills.length > 0,
+        vendorsOwed: owedToVendors,
       });
       setRecent(recentBills);
       // The status tag on each row is computed from its ledger, so the
@@ -242,6 +248,36 @@ export default function DashboardScreen() {
           <Ionicons name="chevron-forward" size={20} color={Colors.lowStock} />
         </Pressable>
       ) : null}
+
+      {/* The purchase side, always present rather than conditional: it carries
+          a figure the owner needs to see even when it is nil, and a card that
+          came and went would be one more thing to hunt for. It is below the
+          low-stock banner because what is owed to a vendor is rarely as urgent
+          as a shelf about to run out mid-sale. */}
+      <Pressable
+        style={({ pressed }) => [styles.vendorCard, pressed && styles.vendorCardPressed]}
+        onPress={() => router.push('/vendors')}
+        accessibilityRole="button"
+        accessibilityLabel={
+          (stats?.vendorsOwed ?? 0) > 0
+            ? `${formatRupees(stats?.vendorsOwed ?? 0)} owed to vendors. Open the vendor list.`
+            : 'Vendors and purchases. Nothing owed.'
+        }>
+        <Ionicons
+          name="business-outline"
+          size={24}
+          color={(stats?.vendorsOwed ?? 0) > 0 ? Colors.lowStock : Colors.brand}
+        />
+        <View style={styles.vendorCardText}>
+          <Text style={styles.vendorCardTitle}>Vendors &amp; purchases</Text>
+          <Text style={styles.vendorCardSub}>
+            {(stats?.vendorsOwed ?? 0) > 0
+              ? `${formatRupees(stats?.vendorsOwed ?? 0)} still owed`
+              : 'Nothing owed right now'}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
+      </Pressable>
 
       {/* Shown only once a backup is genuinely overdue, and never alongside a
           fresh one. The low-stock banner above is about today's trading; this
@@ -415,6 +451,21 @@ const styles = StyleSheet.create({
   billCustomer: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.text },
   billMeta: { fontSize: FontSizes.small, color: Colors.textMuted },
   billTotal: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text, fontVariant: ['tabular-nums'] },
+
+  vendorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  vendorCardPressed: { backgroundColor: Colors.surface },
+  vendorCardText: { flex: 1 },
+  vendorCardTitle: { fontSize: FontSizes.body, fontWeight: '700', color: Colors.text },
+  vendorCardSub: { fontSize: FontSizes.small, color: Colors.textMuted },
 
   // The same two-line amount History uses for an owed row, and the same
   // amber: money still to come is worth attention, not a fault.

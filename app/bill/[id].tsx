@@ -30,7 +30,7 @@ import { customerDisplayName, hasCustomerName } from '@/lib/customer';
 import { rupeesInWords } from '@/lib/numberToWords';
 import { formatQuantityWithUnit } from '@/lib/units';
 import PaymentTags from '@/components/PaymentTags';
-import PaymentLedger from '@/components/PaymentLedger';
+import PaymentLedger, { type LedgerEntry } from '@/components/PaymentLedger';
 import { confirmDeleteBill, startEditingBill } from '@/lib/billActions';
 import {
   buildBillHtml,
@@ -166,7 +166,7 @@ export default function BillResultScreen() {
   );
 
   const handleDeletePayment = useCallback(
-    async (payment: BillPayment) => {
+    async (payment: LedgerEntry) => {
       setSavingPayment(true);
       try {
         const { staleInvoiceNumber } = await deletePayment(payment.id);

@@ -3,7 +3,8 @@ import { useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
-import type { BillPayment, NewPayment } from '@/db/payments';
+import type { NewPayment } from '@/db/payments';
+
 import { formatDate, formatRupees } from '@/lib/format';
 import {
   formatPaymentDate,
@@ -11,6 +12,22 @@ import {
   parsePaymentDate,
   paymentTotalsFor,
 } from '@/lib/payment';
+
+/**
+ * What this component actually reads off a payment.
+ *
+ * Deliberately narrower than `BillPayment`: both a bill's ledger and a
+ * purchase's satisfy it structurally, and neither owner id is used here. Typing
+ * it to one of them would have meant casting the other at the call site, which
+ * is throwing away the check rather than making it true.
+ */
+export type LedgerEntry = {
+  id: number;
+  amount: number;
+  paid_on: string | null;
+  created_at: string;
+  edited_at: string | null;
+};
 
 /**
  * What has been received against a bill, and the way to change it (T9.2).
@@ -29,10 +46,19 @@ import {
 
 type Props = {
   grandTotal: number;
-  payments: BillPayment[];
+  payments: LedgerEntry[];
+  /**
+   * Wording for a ledger with nothing in it.
+   *
+   * A bill's money comes IN and a purchase's goes OUT, and the empty state is
+   * the only line here that says which. Everything else — "of", "still owed",
+   * "Settled in full" — reads correctly from either side, so this is one prop
+   * rather than a second component.
+   */
+  emptyMessage?: string;
   onRecord: (payment: NewPayment) => Promise<void>;
   onEdit: (paymentId: number, payment: NewPayment) => Promise<void>;
-  onDelete: (payment: BillPayment) => Promise<void>;
+  onDelete: (payment: LedgerEntry) => Promise<void>;
   busy?: boolean;
 };
 
@@ -45,12 +71,13 @@ function todayText(): string {
 export default function PaymentLedger({
   grandTotal,
   payments,
+  emptyMessage = 'Nothing recorded yet. Add a payment as the money comes in — it can come in parts.',
   onRecord,
   onEdit,
   onDelete,
   busy,
 }: Props) {
-  const [editing, setEditing] = useState<BillPayment | 'new' | null>(null);
+  const [editing, setEditing] = useState<LedgerEntry | 'new' | null>(null);
   const [amountText, setAmountText] = useState('');
   const [dateText, setDateText] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
@@ -70,7 +97,7 @@ export default function PaymentLedger({
     setFormError(null);
   };
 
-  const openEdit = (payment: BillPayment) => {
+  const openEdit = (payment: LedgerEntry) => {
     setEditing(payment);
     setAmountText(String(payment.amount));
     setDateText(payment.paid_on ? formatPaymentDate(payment.paid_on) : todayText());
@@ -133,7 +160,7 @@ export default function PaymentLedger({
     await proceed();
   };
 
-  const confirmDelete = (payment: BillPayment) => {
+  const confirmDelete = (payment: LedgerEntry) => {
     Alert.alert(
       'Remove this payment?',
       `${formatRupees(payment.amount)}${
@@ -166,9 +193,7 @@ export default function PaymentLedger({
       ) : null}
 
       {payments.length === 0 ? (
-        <Text style={styles.empty}>
-          Nothing recorded yet. Add a payment as the money comes in — it can come in parts.
-        </Text>
+        <Text style={styles.empty}>{emptyMessage}</Text>
       ) : (
         payments.map((payment) => (
           <View key={payment.id} style={styles.row}>

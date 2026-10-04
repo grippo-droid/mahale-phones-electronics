@@ -161,6 +161,48 @@ export type BillItemRow = {
   line_total: number;
 };
 
+/** A supplier the shop buys from (migration 012). */
+export type VendorRow = {
+  id: number;
+  name: string;
+  phone: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
+/**
+ * One vendor bill, as the shop recorded it.
+ *
+ * No GST columns and no `paid`: see migration 012 for why both are absent
+ * rather than merely unused.
+ */
+export type PurchaseRow = {
+  id: number;
+  vendor_id: number;
+  /** The vendor's own bill number, or NULL when they gave none. */
+  vendor_ref: string | null;
+  date: string;
+  total_amount: number;
+  /** 1 only when the owner confirmed moving stock at save time. */
+  stock_applied: number;
+  notes: string | null;
+  created_at: string;
+  edited_at: string | null;
+  deleted_at: string | null;
+};
+
+export type PurchaseItemRow = {
+  id: number;
+  purchase_id: number;
+  /** NULL for a one-off line, or once the product behind it is deleted. */
+  product_id: number | null;
+  product_name_snapshot: string;
+  qty: number;
+  unit: string | null;
+  cost_price: number;
+  line_total: number;
+};
+
 export type QuotationRow = {
   id: number;
   /** Q-0001, Q-0002 … Its own series, unrelated to invoice numbers. */
@@ -609,6 +651,111 @@ const migration011: Migration = {
   },
 };
 
+const migration012: Migration = {
+  version: 12,
+  name: 'vendors_and_purchases',
+  up: async (db) => {
+    // What the shop BUYS, and what it still owes for it (T10.3).
+    //
+    // The mirror of bills, with three deliberate differences:
+    //
+    //   - No GST breakdown. A purchase is an internal record of money going
+    //     out, not a tax document the shop issues. There is nothing to split
+    //     into CGST/SGST/IGST because the shop is not the one charging it.
+    //   - No PDF, ever. Nothing here is printed or handed to anybody, which is
+    //     why the ledger CRUD could be shared while the PDF rule stayed in
+    //     db/payments.ts.
+    //   - No `paid` column, and that is the interesting one. `bills.paid`
+    //     exists only to tell "recorded as unpaid" from "nobody ever said",
+    //     because bills predate their own ledger. Purchases have no such
+    //     history: every row is created by this feature with a ledger from the
+    //     first day, so an empty ledger means UNPAID, full stop. Adding the
+    //     column would invent an `unknown` state that cannot occur.
+    //
+    // `vendor_ref` is the vendor's OWN bill number, nullable. It is not a
+    // number this shop issues and nothing is derived from it -- it exists so a
+    // row can be matched against the paper the vendor handed over.
+    //
+    // `stock_applied` records whether the purchase was allowed to move stock.
+    // It has to be stored: the owner is asked at save time and can say no, so
+    // editing or deleting the purchase later cannot otherwise know whether
+    // there is anything to reverse -- and would take away stock that was never
+    // added.
+    //
+    // `deleted_at` makes deletion soft, unlike a quotation's. Not for a number
+    // this time: a part-paid purchase carries a ledger, and a hard delete
+    // cascades it away, destroying the record of money that actually left the
+    // shop while the vendor rollup silently changes.
+    await db.execAsync(`
+      CREATE TABLE vendors (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT    NOT NULL,
+        phone      TEXT,
+        notes      TEXT,
+        created_at TEXT    NOT NULL
+      );
+
+      CREATE INDEX idx_vendors_name ON vendors (name);
+
+      CREATE TABLE purchases (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        vendor_id     INTEGER NOT NULL REFERENCES vendors (id),
+        /* The vendor's own bill number, as printed on their paper. NULL when
+           they did not give one, which is ordinary for a counter purchase. */
+        vendor_ref    TEXT,
+        date          TEXT    NOT NULL,
+        total_amount  REAL    NOT NULL DEFAULT 0,
+        /* 1 only when the owner confirmed it at save time. */
+        stock_applied INTEGER NOT NULL DEFAULT 0,
+        notes         TEXT,
+        created_at    TEXT    NOT NULL,
+        edited_at     TEXT,
+        deleted_at    TEXT
+      );
+
+      CREATE INDEX idx_purchases_vendor ON purchases (vendor_id);
+      /* Both columns, in this order, for the reason idx_bills_live_date has
+         them: deleted_at is NULL for almost every row, so an index on it alone
+         is nearly useless but SQLite will still choose it for the equality
+         test and then walk every live purchase. */
+      CREATE INDEX idx_purchases_live_date ON purchases (deleted_at, date DESC);
+
+      CREATE TABLE purchase_items (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        purchase_id           INTEGER NOT NULL REFERENCES purchases (id) ON DELETE CASCADE,
+        /* NULL for a one-off line with no inventory record behind it, and set
+           to NULL if the product is later deleted -- the same shape as
+           bill_items, so removing a product never destroys purchase history
+           and nothing can move stock that is gone. */
+        product_id            INTEGER REFERENCES products (id) ON DELETE SET NULL,
+        product_name_snapshot TEXT    NOT NULL,
+        qty                   REAL    NOT NULL,
+        unit                  TEXT,
+        /* What the shop PAID per unit. Not products.purchase_price: that is a
+           running figure the owner maintains, this is what one delivery cost. */
+        cost_price            REAL    NOT NULL,
+        line_total            REAL    NOT NULL
+      );
+
+      CREATE INDEX idx_purchase_items_purchase ON purchase_items (purchase_id);
+
+      /* Column for column identical to bill_payments, which is what lets
+         db/paymentLedger.ts drive both. */
+      CREATE TABLE purchase_payments (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        purchase_id INTEGER NOT NULL REFERENCES purchases (id) ON DELETE CASCADE,
+        amount      REAL    NOT NULL,
+        paid_on     TEXT,
+        note        TEXT,
+        created_at  TEXT    NOT NULL,
+        edited_at   TEXT
+      );
+
+      CREATE INDEX idx_purchase_payments_purchase ON purchase_payments (purchase_id);
+    `);
+  },
+};
+
 /**
  * Every migration ever shipped, in order. Append only.
  */
@@ -624,6 +771,7 @@ export const MIGRATIONS: Migration[] = [
   migration009,
   migration010,
   migration011,
+  migration012,
 ];
 
 /** The schema version the current build of the app expects. */

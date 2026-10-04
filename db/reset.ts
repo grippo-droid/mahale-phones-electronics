@@ -22,6 +22,9 @@ export type ResetSummary = {
   bills: number;
   billItems: number;
   quotations: number;
+  /** Vendors removed, and the purchases recorded against them. */
+  vendors: number;
+  purchases: number;
   /** Invoice counter rows dropped — one per financial year that had bills. */
   invoiceCounters: number;
   /** Whether the quotation counter was reset, so Q-0001 is next again. */
@@ -56,6 +59,8 @@ export async function resetShopData(
     bills: 0,
     billItems: 0,
     quotations: 0,
+    vendors: 0,
+    purchases: 0,
     invoiceCounters: 0,
     quotationCounterCleared: false,
   };
@@ -68,6 +73,8 @@ export async function resetShopData(
       bills: number;
       bill_items: number;
       quotations: number;
+      vendors: number;
+      purchases: number;
       counters: number;
       quotation_counter: number;
     }>(
@@ -76,6 +83,8 @@ export async function resetShopData(
          (SELECT COUNT(*) FROM bills)      AS bills,
          (SELECT COUNT(*) FROM bill_items) AS bill_items,
          (SELECT COUNT(*) FROM quotations) AS quotations,
+         (SELECT COUNT(*) FROM vendors)    AS vendors,
+         (SELECT COUNT(*) FROM purchases)  AS purchases,
          (SELECT COUNT(*) FROM app_settings WHERE key = 'quotation_seq')
            AS quotation_counter,
          (SELECT COUNT(*) FROM app_settings
@@ -86,17 +95,28 @@ export async function resetShopData(
     summary.bills = counts?.bills ?? 0;
     summary.billItems = counts?.bill_items ?? 0;
     summary.quotations = counts?.quotations ?? 0;
+    summary.vendors = counts?.vendors ?? 0;
+    summary.purchases = counts?.purchases ?? 0;
     summary.invoiceCounters = counts?.counters ?? 0;
     summary.quotationCounterCleared = (counts?.quotation_counter ?? 0) > 0;
 
     // Children before parents even though the cascades would handle it — being
     // explicit means this still works if a cascade is ever changed. Quotations
     // go before bills, because a converted one references the bill it became.
+    //
+    // The purchase side goes before `products`, because `purchase_items`
+    // references them, and `vendors` goes last of its own group because
+    // `purchases` points at it with no cascade at all. A vendor left behind
+    // would be a supplier the owner has just erased every purchase from.
     await txn.execAsync(`
       DELETE FROM quotation_items;
       DELETE FROM quotations;
       DELETE FROM bill_items;
       DELETE FROM bills;
+      DELETE FROM purchase_payments;
+      DELETE FROM purchase_items;
+      DELETE FROM purchases;
+      DELETE FROM vendors;
       DELETE FROM products;
     `);
 

@@ -993,6 +993,85 @@ races serialise and a guard's behavioural test passes with the guard removed.
   positive back to NULL. `bill_items.product_id` is a foreign key: the stand-in
   must never reach it, and NULL is already what "no product behind this line"
   means there — it is also what stops `createBill` reducing stock that is gone.
+- **The shop's own purchases are the vendor-side mirror of bills** (T10.3,
+  migration 012): `vendors`, `purchases`, `purchase_items`,
+  `purchase_payments`. Three differences from a bill, all deliberate:
+
+    - **No GST breakdown.** A purchase is an internal record of money going
+      out, not a tax document this shop issues. There is nothing to split,
+      because the shop is not the one charging it.
+    - **No PDF, ever.** Nothing here is printed or handed to anybody. That is
+      what let the ledger CRUD be shared while the PDF rule stayed behind in
+      `db/payments.ts`.
+    - **No `paid` column, and that absence is the design.** `bills.paid` exists
+      only to tell "recorded as unpaid" from "nobody ever said", because bills
+      predate their own ledger. Purchases arrive WITH one, so an empty ledger
+      means unpaid, full stop — `purchaseSettlement` passes `hasEverRecorded`
+      unconditionally and `unknown` cannot occur. A control that drops it fails
+      two checks.
+- **A vendor is normalised; a customer is not, and the asymmetry is the
+  point.** A customer is a walk-in who may never return, so `bills` carries
+  their name as text and the address book fills it in. A vendor is a standing
+  relationship with a running balance, and "what do I owe Sharma Electronics"
+  cannot be asked of free text where one supplier is spelled three ways.
+- **`vendor_ref` is the VENDOR's bill number, not one this shop issues.**
+  Nullable, nothing is derived from it, and no counter moves. It exists so a
+  row can be matched against the paper the vendor handed over.
+- **`stock_applied` has to be stored, because the owner is asked.** A purchase
+  saved without moving stock has nothing to take back, and a delete that
+  assumed otherwise would remove goods the shop never recorded receiving. Two
+  controls cover it: applying stock regardless fails three checks, reversing
+  stock that was never applied fails three.
+- **Deleting a purchase is SOFT, unlike a quotation's.** Not for a number this
+  time: a part-paid purchase carries a ledger, and a hard delete cascades it
+  away — destroying the record of money that actually left the shop while the
+  vendor's rollup silently changes. Deleting twice is a no-op, so stock cannot
+  be taken back twice.
+- **Deleting a VENDOR is refused while purchases reference them.**
+  `purchases.vendor_id` has no cascade on purpose. The error names the count so
+  the screen can say why, rather than surfacing a constraint failure.
+- **A vendor's balance is clamped per purchase and never netted.** Overpaying
+  one vendor bill must not quietly pay off another — that would show a vendor
+  as square while a real debt sat under a credit they never agreed to offset.
+  A control that nets them drops ₹800 owed to ₹300.
+- **The rollup sums in TypeScript, not in SQL.** Two joins to two child tables
+  multiply against each other — three items and two payments gives six rows and
+  triple-counted totals — and letting SQLite sum REAL rupees would give the
+  paise arithmetic a second definition. Same reasoning as
+  `listOutstandingCandidates`.
+- **Stock and cost price are two questions, asked together and answered
+  separately.** Stock is PRE-TICKED: recording a purchase nearly always means
+  goods arrived, so the common answer is already selected and it is one tap.
+  That is still asking — unlike the bill-delete question, which has no default
+  because both of ITS answers are genuinely common. The per-line cost-price
+  checkbox is UNTICKED: `products.purchase_price` is what the owner judges a
+  selling price against, and one delivery at an unusual rate silently rewriting
+  it would move every margin that reads it.
+- **It is a `Modal`, and that is forced rather than chosen.** Android's `Alert`
+  has no checkboxes at all. A free-text line is SHOWN greyed with a note rather
+  than hidden, or the count in the dialog would disagree with the purchase on
+  screen behind it.
+- **The purchase total is TYPED, not summed from the lines.** What matters is
+  the figure on the vendor's bill; their freight, rounding or a discount at the
+  bottom is their business, and a total this screen computed would quietly
+  disagree with the paper in the owner's hand. The lines' sum is shown beside
+  it as a cross-check, amber when they differ, and the typed figure is what
+  saves.
+- **`PaymentLedger` takes a narrow `LedgerEntry`, not `BillPayment`.** It reads
+  only `id`, `amount`, `paid_on` and `edited_at`, and both ledgers satisfy that
+  structurally. The first version cast purchase payments with `as never` at the
+  call site, which is discarding the check rather than satisfying it.
+- **What the harness can and cannot say about this.** The repositories, the
+  settlement arithmetic, the rollup and both delete paths are covered
+  behaviourally. Every screen is source-read only, so a green `purchases` suite
+  says nothing about whether the confirmation modal is reachable, whether the
+  product picker works inside a modal inside a `ScrollView` — this app has been
+  bitten by Android clipping in scroll views before — or whether a `FlatList`
+  inside a `Modal` scrolls on a phone.
+- **Editing a purchase is NOT built** and is its own ticket. Until then a
+  mistyped amount means delete and re-enter, which loses the payment ledger
+  with it. The stock-delta arithmetic is the fiddly part; `editBill` has the
+  shape to copy.
 - **Settlement is a LEDGER, not a flag** (`bill_payments`, migration 010).
   One row per payment received, and the status is COMPUTED from those rows —
   `unknown` / `unpaid` / `partial` / `paid`. A customer paying half now and half

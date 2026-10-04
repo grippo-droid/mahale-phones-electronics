@@ -84,6 +84,16 @@ export type BackupCounts = {
    * would fail this step.
    */
   billPayments?: number;
+  /**
+   * Added with vendors and purchases (schema 12). Optional for the same reason
+   * every count above it is: a backup written before these tables existed
+   * carries no such figure, and "absent" must not be read as "none" or every
+   * older file would fail the verify step.
+   */
+  vendors?: number;
+  purchases?: number;
+  purchaseItems?: number;
+  purchasePayments?: number;
 };
 
 export type BackupManifest = {
@@ -562,15 +572,25 @@ export async function previewRestore(
 }
 
 async function countAllRows(db: SQLiteDatabase): Promise<BackupCounts> {
-  const [products, bills, billItems, settings, quotations, billPayments] = await Promise.all([
+  const [
+    products, bills, billItems, settings, quotations, billPayments,
+    vendors, purchases, purchaseItems, purchasePayments,
+  ] = await Promise.all([
     countRows(db, 'products'),
     countRows(db, 'bills'),
     countRows(db, 'bill_items'),
     countRows(db, 'app_settings'),
     countRows(db, 'quotations'),
     countRows(db, 'bill_payments'),
+    countRows(db, 'vendors'),
+    countRows(db, 'purchases'),
+    countRows(db, 'purchase_items'),
+    countRows(db, 'purchase_payments'),
   ]);
-  return { products, bills, billItems, settings, quotations, billPayments };
+  return {
+    products, bills, billItems, settings, quotations, billPayments,
+    vendors, purchases, purchaseItems, purchasePayments,
+  };
 }
 
 export type RestoreOutcome =
@@ -691,7 +711,15 @@ export async function performRestore(
       (manifest.counts.quotations !== undefined &&
         after.quotations !== manifest.counts.quotations) ||
       (manifest.counts.billPayments !== undefined &&
-        after.billPayments !== manifest.counts.billPayments)
+        after.billPayments !== manifest.counts.billPayments) ||
+      (manifest.counts.vendors !== undefined &&
+        after.vendors !== manifest.counts.vendors) ||
+      (manifest.counts.purchases !== undefined &&
+        after.purchases !== manifest.counts.purchases) ||
+      (manifest.counts.purchaseItems !== undefined &&
+        after.purchaseItems !== manifest.counts.purchaseItems) ||
+      (manifest.counts.purchasePayments !== undefined &&
+        after.purchasePayments !== manifest.counts.purchasePayments)
     ) {
       throw new RestoreFailedError('mismatch', 'verify');
     }
