@@ -12,6 +12,7 @@ const { initDatabase, runMigrations } = require('@/db/init');
 const bills = require('@/db/bills');
 const payments = require('@/db/payments');
 const payment = require('@/lib/payment');
+const ledgerCore = require('@/db/paymentLedger');
 const { LATEST_SCHEMA_VERSION } = require('@/db/schema');
 const SQLite = require('expo-sqlite');
 
@@ -116,6 +117,74 @@ async function run({ check, section }) {
   check('an entry can be removed outright', ledger.length, 1);
   check('and the status is worked out again',
     payments.totalsFor(1000, ledger).state, 'partial');
+
+  section('the batched read, which draws every status tag in a list');
+  // Added with the T10.1 extraction, and it was a genuine hole: nothing called
+  // listPaymentsForBills at all. It is reached only from useBillPayments, a
+  // React hook the harness cannot run -- so the one query behind every tag on
+  // History and the Dashboard had no behavioural cover. A control that grouped
+  // the rows by PAYMENT id instead of bill id passed all 693 checks.
+  const second1 = await bills.createBill(billInput(50, 500), db);
+  const second2 = await bills.createBill(billInput(51, 800), db);
+  await payments.recordPayment(second1.id, { amount: 100, paid_on: '2026-09-02' }, db);
+  await payments.recordPayment(second1.id, { amount: 150, paid_on: '2026-09-09' }, db);
+  await payments.recordPayment(second2.id, { amount: 800, paid_on: '2026-09-03' }, db);
+  const bare = await bills.createBill(billInput(52, 300), db);
+
+  const batched = await payments.listPaymentsForBills(
+    [second1.id, second2.id, bare.id], db);
+
+  check('keyed by BILL id, not payment id', batched.has(second1.id), true);
+  check('with that bill’s entries only', (batched.get(second1.id) ?? []).length, 2);
+  check('and the other bill kept apart', (batched.get(second2.id) ?? []).length, 1);
+  check('every row belongs to the bill it is filed under',
+    (batched.get(second1.id) ?? []).every((row) => row.bill_id === second1.id)
+      && (batched.get(second1.id) ?? []).length > 0, true);
+  check('the other bucket too',
+    (batched.get(second2.id) ?? []).every((row) => row.bill_id === second2.id)
+      && (batched.get(second2.id) ?? []).length > 0, true);
+  // A bill with nothing recorded is ABSENT rather than an empty array -- the
+  // hook reads `ledgers.get(id) ?? []`, so both work, but absence is what the
+  // query actually produces and the test should say which.
+  check('a bill with no payments is not in the map', batched.has(bare.id), false);
+
+  // The two reads must agree. They are one SELECT in paymentLedger.ts for
+  // exactly this reason: an ordering that differed between them would show as
+  // a ledger whose newest entry moved depending on which screen opened it.
+  check('newest first inside a bucket',
+    (batched.get(second1.id) ?? [])[0]?.paid_on ?? null, '2026-09-09');
+  check('matching the single read',
+    JSON.stringify(batched.get(second1.id) ?? []),
+    JSON.stringify(await payments.listPayments(second1.id, db)));
+
+  check('an empty request returns an empty map',
+    (await payments.listPaymentsForBills([], db)).size, 0);
+  check('and an unknown id simply is not there',
+    (await payments.listPaymentsForBills([999999], db)).has(999999), false);
+
+  section('the shared ledger core refuses anything but an identifier');
+  // Both names are interpolated into SQL. They are module constants today, and
+  // the change nobody would notice is a value arriving here from outside.
+  let refused = null;
+  try {
+    await ledgerCore.listLedgerPayments(
+      { table: 'bill_payments; DROP TABLE bills', ownerColumn: 'bill_id' }, 1, db);
+  } catch (err) {
+    refused = err.message;
+  }
+  check('a table name that is not an identifier throws', refused !== null, true);
+  check('and says why', /identifier/i.test(refused || ''), true);
+  check('the bills table is still there',
+    (await db.getFirstAsync('SELECT COUNT(*) AS c FROM bills')).c > 0, true);
+
+  let refusedColumn = null;
+  try {
+    await ledgerCore.listLedgerPayments(
+      { table: 'bill_payments', ownerColumn: 'bill_id = 1 OR 1' }, 1, db);
+  } catch (err) {
+    refusedColumn = err.message;
+  }
+  check('an owner column that is not an identifier throws', refusedColumn !== null, true);
 
   section('every write drops the stored PDF');
   // The file prints the payments. One left on disk would be reshared under the

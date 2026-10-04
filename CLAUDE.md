@@ -1126,6 +1126,43 @@ races serialise and a guard's behavioural test passes with the guard removed.
   `0.1 + 0.2` and thirds of 1000, and a negative control removing the rounding
   still passed — those cases happen to err UPWARD. A float example is not
   automatically a float test; the case has to be one that actually lands short.
+- **The ledger CRUD is shared, in `db/paymentLedger.ts`; the PDF rule is not**
+  (T10.1). Purchases record money going out in instalments with exactly the
+  shape bills already had — one row per payment, a running balance, a status
+  computed and never stored — so the four writes are parameterised by table and
+  owner column rather than copied. The fiddly parts are what would have
+  drifted: the newest-first ordering the single and batched reads must agree
+  on, the `COALESCE(paid_on, created_at)` that keeps an undated row in a
+  sensible place, and `edited_at` being stamped on correction but not on
+  insert.
+
+  **What deliberately stayed in `db/payments.ts` is the PDF invalidation.** It
+  is true of bills and meaningless for purchases, so making it a hook on the
+  shared module would leave it null half the time and hide the rule from the
+  writes it governs. The core takes and returns plain ids instead; the caller
+  keeps its own ordering and its own after-effects. That ordering is
+  load-bearing: `invalidatePdf` runs BEFORE the row is written, and it throws
+  when the bill is gone, which is what stops a payment being recorded against a
+  deleted bill.
+
+  `db/payments.ts` is a thin wrapper whose public surface is byte-identical —
+  every export, every type, same names — so nothing that consumed it was
+  touched. `LedgerPayment` carries `owner_id` and the wrapper maps it back to
+  `bill_id`, which costs one object per row and keeps `BillPayment` as it was.
+  Both the table and owner column are checked against an identifier regex
+  before they reach the SQL, because they are constants today and the change
+  nobody would notice is a value arriving from outside.
+- **`listPaymentsForBills` had no test at all until T10.1, and it is the query
+  behind every status tag on History and the Dashboard.** It is reached only
+  from `useBillPayments`, a React hook the harness cannot run, so it had slipped
+  through — a negative control that grouped the rows by PAYMENT id instead of
+  bill id passed all 693 checks. The `ledger` suite now covers the grouping,
+  that a bill with no payments is ABSENT rather than an empty bucket, and that
+  the batched read returns byte-identical rows to the single read.
+
+  Its first version crashed under that control rather than failing, which hides
+  every later check — the reads are null-safe now, and the same control fires
+  seven clean failures.
 - **Every write to the ledger clears `bills.pdf_path`, inside the repository.**
   From T9.3 the stored file prints the payments, so one left on disk would be
   found by `existingBillPdf` and reshared — a document disagreeing with the

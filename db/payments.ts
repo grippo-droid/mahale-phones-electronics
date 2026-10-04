@@ -1,7 +1,36 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 
 import { getDatabase } from '@/db/init';
+import {
+  insertLedgerPayment,
+  listLedgerPayments,
+  listLedgerPaymentsForOwners,
+  ownerIdFor,
+  removeLedgerPayment,
+  updateLedgerPayment,
+  type LedgerSpec,
+  type LedgerPayment,
+} from '@/db/paymentLedger';
 import { paymentTotalsFor, type PaymentTotals } from '@/lib/payment';
+
+/**
+ * The ledger this module speaks for. The CRUD lives in `db/paymentLedger.ts`,
+ * shared with the purchase ledger; what stays HERE is the one rule that is
+ * true of bills alone — the stored PDF.
+ */
+const BILL_LEDGER: LedgerSpec = { table: 'bill_payments', ownerColumn: 'bill_id' };
+
+/**
+ * The shared row carries `owner_id`; a bill's carries `bill_id`.
+ *
+ * Mapped rather than aliased twice in the SQL, so the public type on this
+ * module is unchanged and no caller had to be touched by the extraction. The
+ * cost is one object per row on a list that holds a page of bills.
+ */
+function asBillPayment(row: LedgerPayment): BillPayment {
+  const { owner_id, ...rest } = row;
+  return { ...rest, bill_id: owner_id };
+}
 
 /**
  * The payment ledger for a bill (T9.2).
@@ -54,13 +83,8 @@ export async function listPayments(
   billId: number,
   db: SQLiteDatabase = getDatabase()
 ): Promise<BillPayment[]> {
-  return db.getAllAsync<BillPayment>(
-    `SELECT id, bill_id, amount, paid_on, note, created_at, edited_at
-       FROM bill_payments
-      WHERE bill_id = ?
-      ORDER BY COALESCE(paid_on, created_at) DESC, id DESC`,
-    billId
-  );
+  const rows = await listLedgerPayments(BILL_LEDGER, billId, db);
+  return rows.map(asBillPayment);
 }
 
 /**
@@ -75,21 +99,9 @@ export async function listPaymentsForBills(
   db: SQLiteDatabase = getDatabase()
 ): Promise<Map<number, BillPayment[]>> {
   const byBill = new Map<number, BillPayment[]>();
-  if (billIds.length === 0) return byBill;
-
-  const placeholders = billIds.map(() => '?').join(', ');
-  const rows = await db.getAllAsync<BillPayment>(
-    `SELECT id, bill_id, amount, paid_on, note, created_at, edited_at
-       FROM bill_payments
-      WHERE bill_id IN (${placeholders})
-      ORDER BY COALESCE(paid_on, created_at) DESC, id DESC`,
-    ...billIds
-  );
-
-  for (const row of rows) {
-    const bucket = byBill.get(row.bill_id) ?? [];
-    bucket.push(row);
-    byBill.set(row.bill_id, bucket);
+  const grouped = await listLedgerPaymentsForOwners(BILL_LEDGER, billIds, db);
+  for (const [billId, rows] of grouped) {
+    byBill.set(billId, rows.map(asBillPayment));
   }
   return byBill;
 }
@@ -130,18 +142,11 @@ export async function recordPayment(
   payment: NewPayment,
   db: SQLiteDatabase = getDatabase()
 ): Promise<PaymentWrite> {
+  // The PDF is cleared BEFORE the row is written, and that ordering is kept
+  // from the original: `invalidatePdf` throws when the bill is gone, so a
+  // payment cannot be recorded against a bill that has since been deleted.
   const staleInvoiceNumber = await invalidatePdf(billId, db);
-
-  await db.runAsync(
-    `INSERT INTO bill_payments (bill_id, amount, paid_on, note, created_at)
-     VALUES (?, ?, ?, ?, ?)`,
-    billId,
-    payment.amount,
-    payment.paid_on,
-    payment.note ?? null,
-    new Date().toISOString()
-  );
-
+  await insertLedgerPayment(BILL_LEDGER, billId, payment, db);
   return { staleInvoiceNumber };
 }
 
@@ -158,25 +163,9 @@ export async function editPayment(
   payment: NewPayment,
   db: SQLiteDatabase = getDatabase()
 ): Promise<PaymentWrite> {
-  const existing = await db.getFirstAsync<{ bill_id: number }>(
-    'SELECT bill_id FROM bill_payments WHERE id = ?',
-    paymentId
-  );
-  if (!existing) throw new Error(`Payment ${paymentId} not found.`);
-
-  const staleInvoiceNumber = await invalidatePdf(existing.bill_id, db);
-
-  await db.runAsync(
-    `UPDATE bill_payments
-        SET amount = ?, paid_on = ?, note = ?, edited_at = ?
-      WHERE id = ?`,
-    payment.amount,
-    payment.paid_on,
-    payment.note ?? null,
-    new Date().toISOString(),
-    paymentId
-  );
-
+  const billId = await ownerIdFor(BILL_LEDGER, paymentId, db);
+  const staleInvoiceNumber = await invalidatePdf(billId, db);
+  await updateLedgerPayment(BILL_LEDGER, paymentId, payment, db);
   return { staleInvoiceNumber };
 }
 
@@ -184,15 +173,9 @@ export async function deletePayment(
   paymentId: number,
   db: SQLiteDatabase = getDatabase()
 ): Promise<PaymentWrite> {
-  const existing = await db.getFirstAsync<{ bill_id: number }>(
-    'SELECT bill_id FROM bill_payments WHERE id = ?',
-    paymentId
-  );
-  if (!existing) throw new Error(`Payment ${paymentId} not found.`);
-
-  const staleInvoiceNumber = await invalidatePdf(existing.bill_id, db);
-  await db.runAsync('DELETE FROM bill_payments WHERE id = ?', paymentId);
-
+  const billId = await ownerIdFor(BILL_LEDGER, paymentId, db);
+  const staleInvoiceNumber = await invalidatePdf(billId, db);
+  await removeLedgerPayment(BILL_LEDGER, paymentId, db);
   return { staleInvoiceNumber };
 }
 
