@@ -25,7 +25,7 @@
  * ---------------------------------------------------------------------------
  */
 
-const { tempDir } = require('../harness/check');
+const { tempDir, readSourceWithoutComments } = require('../harness/check');
 const {
   encodeBackup,
   decodeBackup,
@@ -252,6 +252,35 @@ async function run({ check, section }) {
   const later = backupFileName(new Date('2026-11-12T13:14:15.000Z'));
   check('it ends with the backup extension', early.endsWith('.mpebak'), true);
   check('and they sort in order', [early, later].sort(), [early, later]);
+
+  section('the manifest counts every table the restore verifies');
+  // `createBackup` needs a filesystem, so this is read from the source rather
+  // than driven -- the same honest limit as the rest of that function.
+  //
+  // The bug it guards was real and silent: the write side listed its tables
+  // inline and the verify side had its own list, and when migration 010 added
+  // bill_payments only the verify side learned about it. Every backup ever
+  // written carried no billPayments figure, so the `!== undefined` guard --
+  // there so an older file is not failed for a count it could not carry -- was
+  // true for every file in existence, and the payment ledger was backed up but
+  // never verified.
+  const source = readSourceWithoutComments('db/backup.ts');
+
+  check('the manifest is built from the shared counter',
+    /counts,/.test(source) && /countAllRows\(db\)/.test(source), true);
+  check('and no longer spells its own list of tables',
+    /counts: \{ products, bills, billItems/.test(source), false);
+
+  // The shared counter has to actually cover the ledger, or sharing it changes
+  // nothing.
+  const at = source.indexOf('async function countAllRows');
+  const counter = at === -1 ? '' : source.slice(at, at + 600);
+  for (const table of ['products', 'bills', 'bill_items', 'app_settings',
+                       'quotations', 'bill_payments']) {
+    check(`it counts ${table}`, counter.includes(`'${table}'`), true);
+  }
+  check('and returns the ledger figure', counter.includes('billPayments'), true);
+
 }
 
 module.exports = { run };

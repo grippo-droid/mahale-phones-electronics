@@ -1196,6 +1196,29 @@ races serialise and a guard's behavioural test passes with the guard removed.
   the verification, exactly as `quotations` is. Miss the count and the restore
   silently stops verifying that table; make it required and every older backup
   fails the verify step, because "absent" is not "none".
+- **That rule was broken for `bill_payments` from the day it was written, and
+  the counts now have ONE definition because of it** (T10.2). `createBackup`
+  listed its tables inline and the restore verification had its own list in
+  `countAllRows`. Migration 010 added the ledger; only the verification side
+  learned to count it. So every backup this app has written carries no
+  `billPayments` figure, and the `!== undefined` guard — there precisely so an
+  older file is not failed for a count it could not have carried — was true for
+  every file in existence. **The payment ledger was being backed up and never
+  verified.**
+
+  Not data loss: the rows travel inside the serialised database either way. But
+  a restore that dropped them would have reported success, which is the whole
+  thing the manifest check exists to catch.
+
+  `createBackup` now calls `countAllRows`, the same function the verification
+  uses, so a table added to one side cannot be missed by the other. That is the
+  fix — not remembering to update two lists.
+
+  Honest about the cover: `createBackup` needs a filesystem and is still
+  uncovered, so the guard is a source check (plus one asserting the shared
+  counter really does count every table). Two controls: restoring the inline
+  list fails two checks, and dropping `bill_payments` from the shared counter
+  fails one.
 - **The ledger is per bill and survives a soft delete.** Anything that ever sums
   what the shop has COLLECTED must exclude deleted bills the way
   `getSalesSummary` already does — the ledger rows themselves carry no such

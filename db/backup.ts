@@ -395,16 +395,22 @@ export async function createBackup(
 
   const database = await db.serializeAsync();
 
-  const [schemaVersion, products, bills, billItems, settings, quotations, shopName] =
-    await Promise.all([
-      getSchemaVersion(db),
-      countRows(db, 'products'),
-      countRows(db, 'bills'),
-      countRows(db, 'bill_items'),
-      countRows(db, 'app_settings'),
-      countRows(db, 'quotations'),
-      shopNameFor(db),
-    ]);
+  // Counted through `countAllRows`, the SAME function the restore verifies
+  // with. It used to be an inline list here, and the two drifted exactly as
+  // two copies do: migration 010 added `bill_payments`, the verification side
+  // learned to count it and this one never did. Every backup the app has
+  // written therefore carries no `billPayments` figure, and the guard that
+  // reads it — `!== undefined`, there so an older file is not failed for a
+  // count it could not have carried — was true for every file in existence.
+  // The ledger was being backed up and never verified.
+  //
+  // One definition means a table added to one side cannot be missed by the
+  // other, which is the whole of what went wrong.
+  const [schemaVersion, counts, shopName] = await Promise.all([
+    getSchemaVersion(db),
+    countAllRows(db),
+    shopNameFor(db),
+  ]);
 
   const manifest: BackupManifest = {
     format: FORMAT_VERSION,
@@ -415,7 +421,7 @@ export async function createBackup(
     shopName,
     databaseBytes: database.length,
     checksum: checksum(database),
-    counts: { products, bills, billItems, settings, quotations },
+    counts,
   };
 
   const directory = backupDirectory();
