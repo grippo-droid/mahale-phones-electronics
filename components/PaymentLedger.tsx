@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
+import { RECEIVED_WORDING, type LedgerWording } from '@/lib/ledgerWording';
 import type { NewPayment } from '@/db/payments';
 
 import { formatDate, formatRupees } from '@/lib/format';
@@ -30,7 +31,8 @@ export type LedgerEntry = {
 };
 
 /**
- * What has been received against a bill, and the way to change it (T9.2).
+ * What has been paid against a bill or a purchase, and the way to change it
+ * (T9.2; both directions since T10.4).
  *
  * A ledger rather than a flag, because a customer paying half now and half next
  * week is ordinary and two states could not say it. Every entry is editable and
@@ -47,15 +49,8 @@ export type LedgerEntry = {
 type Props = {
   grandTotal: number;
   payments: LedgerEntry[];
-  /**
-   * Wording for a ledger with nothing in it.
-   *
-   * A bill's money comes IN and a purchase's goes OUT, and the empty state is
-   * the only line here that says which. Everything else — "of", "still owed",
-   * "Settled in full" — reads correctly from either side, so this is one prop
-   * rather than a second component.
-   */
-  emptyMessage?: string;
+  /** Which direction the money goes. Defaults to a bill's. */
+  wording?: LedgerWording;
   onRecord: (payment: NewPayment) => Promise<void>;
   onEdit: (paymentId: number, payment: NewPayment) => Promise<void>;
   onDelete: (payment: LedgerEntry) => Promise<void>;
@@ -71,7 +66,7 @@ function todayText(): string {
 export default function PaymentLedger({
   grandTotal,
   payments,
-  emptyMessage = 'Nothing recorded yet. Add a payment as the money comes in — it can come in parts.',
+  wording = RECEIVED_WORDING,
   onRecord,
   onEdit,
   onDelete,
@@ -90,9 +85,24 @@ export default function PaymentLedger({
 
   const openNew = () => {
     setEditing('new');
-    // Pre-filled with what is still owed: the commonest payment by far is the
-    // one that settles the bill, and the owner can type over it.
-    setAmountText(totals.outstanding > 0 ? String(totals.outstanding) : '');
+    /**
+     * EMPTY, deliberately (T10.4).
+     *
+     * It used to open pre-filled with the outstanding balance, on the reasoning
+     * that the commonest payment is the one that settles up. Two things are
+     * wrong with that.
+     *
+     * The settle-in-full case already has its own control — the status tag,
+     * one tap, no dialog. So this dialog exists for the OTHER case, a part
+     * payment, and it was pre-filling the one case it is not for.
+     *
+     * And the failure is quiet: a number already in the box, a tap on Record,
+     * and afterwards nothing can tell "the owner decided ₹2,500" from "the
+     * owner accepted what was offered". Money is the wrong thing to put a
+     * default under — the same reason `payment_type` and `paid` have none, and
+     * the delete-stock question has none.
+     */
+    setAmountText('');
     setDateText(todayText());
     setFormError(null);
   };
@@ -143,12 +153,12 @@ export default function PaymentLedger({
     if (over > 0) {
       // Warned, not blocked — see the note at the top.
       Alert.alert(
-        'More than the bill',
-        `That would make ${formatRupees(
-          paymentTotalsFor(grandTotal, wouldTotal).paidAmount
-        )} received against a bill of ${formatRupees(grandTotal)} — ${formatRupees(
-          over
-        )} more than is owed.\n\nRecord it anyway?`,
+        wording.overTitle,
+        wording.overBody(
+          formatRupees(paymentTotalsFor(grandTotal, wouldTotal).paidAmount),
+          formatRupees(grandTotal),
+          formatRupees(over)
+        ),
         [
           { text: 'Go back', style: 'cancel' },
           { text: 'Record it', onPress: () => void proceed() },
@@ -193,7 +203,7 @@ export default function PaymentLedger({
       ) : null}
 
       {payments.length === 0 ? (
-        <Text style={styles.empty}>{emptyMessage}</Text>
+        <Text style={styles.empty}>{wording.empty}</Text>
       ) : (
         payments.map((payment) => (
           <View key={payment.id} style={styles.row}>
@@ -253,7 +263,7 @@ export default function PaymentLedger({
               {editing === 'new' ? 'Record a payment' : 'Change this payment'}
             </Text>
 
-            <Text style={styles.fieldLabel}>Amount received</Text>
+            <Text style={styles.fieldLabel}>{wording.amount}</Text>
             <TextInput
               style={styles.input}
               value={amountText}
@@ -261,10 +271,10 @@ export default function PaymentLedger({
               keyboardType="decimal-pad"
               placeholder="0"
               placeholderTextColor={Colors.textMuted}
-              accessibilityLabel="Amount received"
+              accessibilityLabel={wording.amount}
             />
 
-            <Text style={styles.fieldLabel}>Date received</Text>
+            <Text style={styles.fieldLabel}>{wording.date}</Text>
             <TextInput
               style={styles.input}
               value={dateText}
@@ -272,7 +282,7 @@ export default function PaymentLedger({
               keyboardType="numbers-and-punctuation"
               placeholder="dd/mm/yyyy"
               placeholderTextColor={Colors.textMuted}
-              accessibilityLabel="Date received, as day slash month slash year"
+              accessibilityLabel={`${wording.date}, as day slash month slash year`}
             />
 
             {formError ? <Text style={styles.formError}>{formError}</Text> : null}

@@ -5,6 +5,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View
 
 import ErrorBanner from '@/components/ErrorBanner';
 import PaymentLedger, { type LedgerEntry } from '@/components/PaymentLedger';
+import { PAID_WORDING } from '@/lib/ledgerWording';
 import PaymentTags from '@/components/PaymentTags';
 import { Colors, FontSizes, Spacing } from '@/constants/theme';
 import { getPurchaseById, deletePurchase, type PurchaseWithItems } from '@/db/purchases';
@@ -13,6 +14,7 @@ import {
   editPurchasePayment,
   listPurchasePayments,
   recordPurchasePayment,
+  settleRemainingPurchase,
   totalsFor,
   type PurchasePayment,
 } from '@/db/purchasePayments';
@@ -103,6 +105,31 @@ export default function PurchaseScreen() {
     },
     [reloadLedger]
   );
+
+  /**
+   * The one-tap shortcut, matching the bill tag on History and the Dashboard:
+   * record whatever is still owed, in a single entry.
+   *
+   * It only ever moves a purchase TOWARDS settled. There is no un-pay — that
+   * would mean deleting ledger rows, and there is no honest answer to which of
+   * several instalments a stray tap should remove.
+   *
+   * This is also what makes the empty amount field affordable. Settling in
+   * full was the case the pre-fill was quietly serving, and it now has a
+   * control of its own rather than a number sitting in a box.
+   */
+  const settleAll = useCallback(async () => {
+    if (!purchase) return;
+    setSavingPayment(true);
+    try {
+      const recorded = await settleRemainingPurchase(purchase.id);
+      if (recorded) await reloadLedger();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingPayment(false);
+    }
+  }, [purchase, reloadLedger]);
 
   const handleDelete = useCallback(
     async (payment: LedgerEntry) => {
@@ -213,7 +240,15 @@ export default function PurchaseScreen() {
           </View>
         </View>
 
-        <PaymentTags paymentType={null} state={totals.state} />
+        {/* Tappable while anything is outstanding. A settled purchase gets a
+            plain tag: there is nothing left to record, and the ledger below is
+            already showing what went out. */}
+        <PaymentTags
+          paymentType={null}
+          state={totals.state}
+          onTogglePaid={totals.outstanding > 0 ? settleAll : undefined}
+          busy={savingPayment}
+        />
 
         {purchase.stock_applied === 1 ? (
           <Text style={styles.stockNote}>These items were added to stock.</Text>
@@ -260,7 +295,7 @@ export default function PurchaseScreen() {
           onEdit={handleEdit}
           onDelete={handleDelete}
           busy={savingPayment}
-          emptyMessage="Nothing paid yet. Record each payment as it goes out — it can go in parts."
+          wording={PAID_WORDING}
         />
       </View>
 

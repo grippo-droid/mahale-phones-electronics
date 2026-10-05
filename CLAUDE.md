@@ -1252,6 +1252,47 @@ races serialise and a guard's behavioural test passes with the guard removed.
   that will be missed at one. The repository returns the invoice number; the
   CALLER deletes the file, because the repository has no business touching the
   filesystem.
+- **The amount field in the payment dialog opens EMPTY, on both sides**
+  (T10.4). It used to be pre-filled with the outstanding balance, on the
+  reasoning that the commonest payment settles the bill. Two things are wrong
+  with that.
+
+  The settle-in-full case already has its own control — the status tag, one
+  tap, no dialog. So the dialog exists for the OTHER case, a part payment, and
+  it was pre-filling the one case it is not for.
+
+  And the failure is quiet: a number already in the box, a tap on Record, and
+  afterwards nothing can tell "the owner decided ₹2,500" from "the owner
+  accepted what was offered". Money is the wrong thing to put a default under —
+  the same reason `payment_type` and `paid` have none and the delete-stock
+  question has none. Editing an EXISTING entry still shows its figure, which is
+  not a default but the value being corrected.
+- **Every string that says which WAY the money went lives in
+  `lib/ledgerWording.ts`**, as `RECEIVED_WORDING` and `PAID_WORDING`. There are
+  five of them — the empty state, the amount label, the date label, and the
+  overpayment warning's title and body — and the first attempt at this fixed
+  ONE, leaving a purchase screen where the shop pays a vendor reading "Amount
+  received". That is the T9.9 shape again: one surface corrected, the rest left
+  saying the wrong thing.
+
+  So it is one object rather than five props. A third ledger picks a side; it
+  cannot pick four strings and miss the fifth. The rest of the component is
+  genuinely direction-neutral — "of", "still owed", "Settled in full" read
+  correctly either way — and is deliberately not in there.
+
+  It is in `lib/` rather than beside the component because **the harness cannot
+  load a `.tsx` at all**: JSX is not type syntax Node can strip, so anything
+  declared in one is unreachable from a test. Same reason `billToCartLines`
+  moved out of `lib/billActions.ts`.
+- **The purchase screen's status tag is tappable; the bill screen's is not, and
+  that is now an inconsistency worth knowing about.** T5.10 made the tag
+  read-only on the bill detail screen, on the reasoning that a bill opened on
+  its own is being read rather than processed, and that the lists are where the
+  owner works through a stack of them. The purchase screen has no list
+  equivalent carrying a tappable tag — the vendor detail screen shows purchases
+  but its tags are read-only — so without this there was no one-tap settle for a
+  purchase anywhere, which also made emptying the amount field cost more than it
+  bought. Worth revisiting as one decision rather than two.
 - **The one-tap tag only ever moves a bill TOWARDS settled.** It records one
   entry for whatever is still owed. There is no un-pay: that would mean deleting
   payment rows, and there is no honest answer to which of several instalments a

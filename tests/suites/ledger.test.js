@@ -7,12 +7,13 @@
  * beside the amber-fill one, or how any of it reads on a phone. No renderer.
  */
 
-const { tempDir } = require('../harness/check');
+const { tempDir, readSourceWithoutComments } = require('../harness/check');
 const { initDatabase, runMigrations } = require('@/db/init');
 const bills = require('@/db/bills');
 const payments = require('@/db/payments');
 const payment = require('@/lib/payment');
 const ledgerCore = require('@/db/paymentLedger');
+const wording = require('@/lib/ledgerWording');
 const { LATEST_SCHEMA_VERSION } = require('@/db/schema');
 const SQLite = require('expo-sqlite');
 
@@ -117,6 +118,56 @@ async function run({ check, section }) {
   check('an entry can be removed outright', ledger.length, 1);
   check('and the status is worked out again',
     payments.totalsFor(1000, ledger).state, 'partial');
+
+  section('the amount field opens EMPTY, and the wording says which way the money went');
+  // Both are T10.4, and both are source checks -- there is no renderer, so what
+  // is held here is the shape of the mistake rather than a rendered dialog.
+  const ledgerUi = readSourceWithoutComments('components/PaymentLedger.tsx');
+
+  // The pre-fill: it used to open with the outstanding balance, which meant the
+  // dialog pre-filled the one case it is not for (settling in full has its own
+  // one-tap control) and left nothing able to tell a decision from an accepted
+  // default afterwards.
+  check('nothing seeds the box from the balance',
+    /setAmountText\(.*outstanding/.test(ledgerUi), false);
+  check('a new entry starts blank', ledgerUi.includes("setAmountText('')"), true);
+  // Editing an EXISTING entry must still show its figure -- that is not a
+  // default, it is the value being corrected.
+  check('but editing one still shows what it was',
+    /setAmountText\(String\(payment\.amount\)\)/.test(ledgerUi), true);
+
+  // The wording: one object, both directions, so a third ledger cannot pick
+  // four strings and miss the fifth the way the first attempt did.
+  check('a received wording exists', typeof wording.RECEIVED_WORDING, 'object');
+  check('and a paid one', typeof wording.PAID_WORDING, 'object');
+  for (const key of ['empty', 'amount', 'date', 'overTitle', 'overBody']) {
+    check(`both carry ${key}`,
+      wording.RECEIVED_WORDING[key] !== undefined
+        && wording.PAID_WORDING[key] !== undefined, true);
+  }
+  check('the bill side says received',
+    wording.RECEIVED_WORDING.amount, 'Amount received');
+  check('the purchase side says paid', wording.PAID_WORDING.amount, 'Amount paid');
+  check('and their dates differ too',
+    wording.RECEIVED_WORDING.date !== wording.PAID_WORDING.date, true);
+  check('the overpay body names a bill',
+    /bill/.test(wording.RECEIVED_WORDING.overBody('a', 'b', 'c')), true);
+  check('and a purchase',
+    /purchase/.test(wording.PAID_WORDING.overBody('a', 'b', 'c')), true);
+
+  // No direction-specific literal may sit in the markup any more. The two
+  // constants are the only place either word belongs.
+  // The IDENTIFIER RECEIVED_WORDING is fine -- what must not come back is the
+  // word as text the owner reads. The first version of this check grepped
+  // case-insensitively and caught the import, which is the kind of false
+  // positive that gets a real check deleted.
+  const withoutIdentifier = ledgerUi.split('RECEIVED_WORDING').join('');
+  check('no "received" text left in the component', /received/i.test(withoutIdentifier), false);
+  check('nor "paid" as a label', /Amount paid|Date paid/.test(withoutIdentifier), false);
+  check('the amount label comes from the wording',
+    /\{wording\.amount\}/.test(ledgerUi), true);
+  check('the date label too', /\{wording\.date\}/.test(ledgerUi), true);
+  check('and the overpay warning', /wording\.overBody\(/.test(ledgerUi), true);
 
   section('the batched read, which draws every status tag in a list');
   // Added with the T10.1 extraction, and it was a genuine hole: nothing called

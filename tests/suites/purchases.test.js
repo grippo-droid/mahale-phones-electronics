@@ -365,7 +365,12 @@ async function run({ check, section }) {
   check('the purchase screen reuses the shared ledger',
     /<PaymentLedger/.test(detail), true);
   check('with wording for money going out',
-    /emptyMessage=/.test(detail), true);
+    /wording=\{PAID_WORDING\}/.test(detail), true);
+  // The one-tap settle, matching the bill tag on History and the Dashboard.
+  check('and a tappable tag while anything is outstanding',
+    /onTogglePaid=\{totals\.outstanding > 0 \? settleAll : undefined\}/.test(detail), true);
+  check('wired to the repository shortcut',
+    /settleRemainingPurchase\(purchase\.id\)/.test(detail), true);
   // No Cash/Credit on a purchase -- there is no such decision being struck.
   check('and shows a status pill with no payment type',
     /paymentType=\{null\}/.test(detail), true);
