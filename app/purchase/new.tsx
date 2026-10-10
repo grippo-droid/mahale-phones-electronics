@@ -118,9 +118,11 @@ export default function NewPurchaseScreen() {
       Number.parseFloat(line.qty) > 0
   );
 
+  // Items are optional (T10.5). A vendor and a total are the whole of what a
+  // purchase has to be: "I bought ₹4,000 from Sharma today" is an ordinary
+  // thing to record, and the ledger settles against the total either way.
   const problems: string[] = [];
   if (!vendor) problems.push('Choose which vendor this is from.');
-  if (usableLines.length === 0) problems.push('Add at least one item.');
   if (!Number.isFinite(typedTotal) || typedTotal <= 0) {
     problems.push('Enter the total on the vendor’s bill.');
   }
@@ -207,7 +209,10 @@ export default function NewPurchaseScreen() {
           accessibilityLabel="The vendor's own bill number"
         />
 
-        <Text style={styles.label}>Items</Text>
+        <Text style={styles.label}>Items (optional)</Text>
+        <Text style={styles.hint}>
+          Leave these blank to record just the total owed to this vendor.
+        </Text>
         {lines.map((line, index) => (
           <View key={line.key} style={styles.lineCard}>
             <View style={styles.lineTop}>
@@ -292,7 +297,7 @@ export default function NewPurchaseScreen() {
             as a cross-check. They can legitimately differ — freight, a discount
             at the bottom, the vendor's own rounding — so this reports the gap
             rather than refusing it. */}
-        {linesTotal > 0 ? (
+        {usableLines.length > 0 ? (
           <Text
             style={[
               styles.linesTotal,
@@ -337,7 +342,18 @@ export default function NewPurchaseScreen() {
         style={({ pressed }) => [styles.save, pressed && styles.savePressed]}
         onPress={() => {
           if (problems.length > 0) return;
-          setConfirming(true);
+          /**
+           * The confirmation has two questions — update stock, and update cost
+           * prices — and BOTH are about products in Inventory. With no lines,
+           * or only free-text ones, it has nothing to ask and would be a modal
+           * whose only honest answer is "there is nothing here". So it is
+           * skipped and the purchase saves without touching stock.
+           */
+          if (confirmLines.some((line) => line.productId !== null)) {
+            setConfirming(true);
+            return;
+          }
+          void save({ applyStock: false, updateCostFor: [] });
         }}
         accessibilityRole="button"
         accessibilityLabel="Save this purchase">
@@ -536,6 +552,7 @@ const styles = StyleSheet.create({
   },
   addLineText: { fontSize: FontSizes.body, fontWeight: '600', color: Colors.brand },
 
+  hint: { fontSize: FontSizes.small, color: Colors.textMuted },
   linesTotal: { fontSize: FontSizes.small, color: Colors.textMuted },
   linesTotalDiffers: { color: Colors.lowStock },
 

@@ -263,6 +263,15 @@ export default function PurchaseScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Items</Text>
+        {/* An amount-only purchase is ordinary (T10.5), so an empty list says
+            so in one line rather than leaving a heading over nothing — which
+            reads as a load that failed. The total below is the real record
+            either way. */}
+        {purchase.items.length === 0 ? (
+          <Text style={styles.noItems}>
+            No items recorded — this purchase is the total only.
+          </Text>
+        ) : null}
         {purchase.items.map((item) => (
           <View key={item.id} style={styles.itemRow}>
             <View style={styles.itemMain}>
@@ -345,6 +354,7 @@ const styles = StyleSheet.create({
   stockNoteMuted: { fontSize: FontSizes.small, color: Colors.textMuted },
   notes: { fontSize: FontSizes.small, color: Colors.textMuted },
 
+  noItems: { fontSize: FontSizes.small, color: Colors.textMuted },
   itemRow: {
     flexDirection: 'row',
     alignItems: 'center',

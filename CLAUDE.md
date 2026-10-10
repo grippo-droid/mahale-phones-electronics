@@ -1017,6 +1017,36 @@ races serialise and a guard's behavioural test passes with the guard removed.
 - **`vendor_ref` is the VENDOR's bill number, not one this shop issues.**
   Nullable, nothing is derived from it, and no counter moves. It exists so a
   row can be matched against the paper the vendor handed over.
+- **A purchase may be JUST AN AMOUNT — items are optional** (T10.5). "I bought
+  ₹4,000 from Sharma today" is a complete and ordinary thing to record, and
+  refusing it would send the owner back to a paper book for exactly the
+  purchases he is least inclined to itemise. A vendor, a date and a total over
+  zero are the whole requirement; `createPurchase` guards the TOTAL now, where
+  it used to guard the item count, because the total is what the ledger settles
+  against either way.
+
+  **No migration was needed, and the audit is worth recording so it is not
+  redone.** Nothing required a child row: there is no `CHECK` and no
+  constraint, and the `NOT NULL`s are all WITHIN a `purchase_items` row, so
+  they only bind if one exists. The vendor rollup reads `purchases` plus a
+  `purchase_payments` subquery and never touches items. `purchaseSettlement`
+  takes `total_amount` only. The search's item-name `EXISTS` simply does not
+  match, leaving the vendor and reference `LIKE` to work as before.
+
+  The confirmation modal is SKIPPED when no line has a product behind it. Both
+  of its questions — update stock, update cost prices — are about products in
+  Inventory, so with nothing to ask it would be a dialog whose only honest
+  answer is "there is nothing here". The purchase then saves without touching
+  stock.
+- **`stock_applied` records what MOVED, not what was answered.** The owner can
+  tick "update stock" on a purchase whose lines are all free text, or on one
+  with no lines at all — and nothing can move. Storing `1` there would claim a
+  movement that never happened and arm a later delete to take goods off the
+  shelf the shop never received, which is the exact failure the column exists
+  to prevent. So it is `applyStock && there are product lines`. Two controls:
+  following the answer instead fails two checks, and removing that guard
+  together with the delete's `stock_applied === 1` guard fails five, including
+  stock genuinely coming off the shelf.
 - **`stock_applied` has to be stored, because the owner is asked.** A purchase
   saved without moving stock has nothing to take back, and a delete that
   assumed otherwise would remove goods the shop never recorded receiving. Two

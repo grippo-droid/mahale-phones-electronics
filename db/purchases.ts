@@ -32,6 +32,10 @@ export type NewPurchase = {
   date?: Date;
   total_amount: number;
   notes?: string | null;
+  /**
+   * What was bought, line by line. MAY BE EMPTY (T10.5) — an amount-only
+   * purchase records that money is owed to a vendor without itemising it.
+   */
   items: NewPurchaseItem[];
   /**
    * Whether to add these quantities to stock.
@@ -116,11 +120,30 @@ export async function createPurchase(
   input: NewPurchase,
   db: SQLiteDatabase = getDatabase()
 ): Promise<PurchaseWithItems> {
-  if (input.items.length === 0) throw new Error('A purchase needs at least one item.');
+  // A purchase needs a vendor, a date and a figure. Items are OPTIONAL (T10.5):
+  // "I bought ₹4,000 of stock from Sharma today" is a complete and ordinary
+  // thing to record, and refusing it would send the owner back to a paper book
+  // for exactly the purchases he is least inclined to itemise. The TOTAL is
+  // what the ledger settles against, so that is what is required instead.
+  if (!Number.isFinite(input.total_amount) || input.total_amount <= 0) {
+    throw new Error('A purchase needs a total of more than zero.');
+  }
 
   const date = (input.date ?? new Date()).toISOString();
   const now = new Date().toISOString();
   const updateCostFor = new Set(input.updateCostFor ?? []);
+
+  /**
+   * Stock is recorded as applied only when it actually moved.
+   *
+   * `applyStock` is what the owner answered; this is what happened. With no
+   * lines — or only free-text ones with nothing in Inventory behind them —
+   * there is nothing to add, so storing 1 would claim a movement that never
+   * occurred and leave a later delete offering to take back goods the shop
+   * never recorded receiving. That is the whole reason the column exists.
+   */
+  const stockMoves = quantitiesByProduct(input.items);
+  const stockApplied = input.applyStock && stockMoves.size > 0;
   let purchaseId = 0;
 
   await db.withExclusiveTransactionAsync(async (txn) => {
@@ -138,7 +161,7 @@ export async function createPurchase(
       input.vendor_ref?.trim() || null,
       date,
       input.total_amount,
-      input.applyStock ? 1 : 0,
+      stockApplied ? 1 : 0,
       input.notes?.trim() || null,
       now
     );
@@ -160,8 +183,8 @@ export async function createPurchase(
       }
     }
 
-    if (input.applyStock) {
-      for (const [productId, qty] of quantitiesByProduct(input.items)) {
+    if (stockApplied) {
+      for (const [productId, qty] of stockMoves) {
         await txn.runAsync(
           'UPDATE products SET stock_qty = stock_qty + ?, updated_at = ? WHERE id = ?',
           qty,

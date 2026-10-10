@@ -202,6 +202,92 @@ async function run({ check, section }) {
   check('and the cable is untouched by a purchase it is not on',
     (await products.getProductById(cable.id, db)).purchase_price, 450);
 
+  section('a purchase with NO items at all');
+  // The common case this exists for: "I bought 4,000 rupees from Sharma
+  // today", with no appetite for itemising it. A vendor, a date and a total
+  // are the whole of what a purchase has to be.
+  const amountOnly = await purchases.createPurchase(
+    {
+      vendor_id: sharma.id,
+      vendor_ref: 'SE/2026/90',
+      date: at(2026, 9, 18),
+      total_amount: 4000,
+      items: [],
+      applyStock: true,
+    },
+    db
+  );
+  check('it saves', amountOnly.total_amount, 4000);
+  check('with no lines', amountOnly.items.length, 0);
+  // applyStock was TRUE and must still be recorded as 0: nothing moved, and a
+  // later delete would otherwise offer to take back goods never received.
+  check('and stock is recorded as not applied', amountOnly.stock_applied, 0);
+  check('it reads back', (await purchases.getPurchaseById(amountOnly.id, db)).items.length, 0);
+
+  // A total is what a purchase is now required to have, in place of an item.
+  let noTotal = null;
+  try {
+    await purchases.createPurchase(
+      { vendor_id: sharma.id, total_amount: 0, items: [], applyStock: false }, db);
+  } catch (err) {
+    noTotal = err.message;
+  }
+  check('but a purchase with no total is refused', noTotal !== null, true);
+  check('and says why', /total/i.test(noTotal || ''), true);
+
+  section('an amount-only purchase settles like any other');
+  check('it starts unpaid',
+    purchasePayments.totalsFor(4000, await purchasePayments.listPurchasePayments(amountOnly.id, db))
+      .state, 'unpaid');
+  await purchasePayments.recordPurchasePayment(amountOnly.id, { amount: 1500, paid_on: '2026-09-19' }, db);
+  let amountLedger = await purchasePayments.listPurchasePayments(amountOnly.id, db);
+  check('takes a part payment', purchasePayments.totalsFor(4000, amountLedger).state, 'partial');
+  check('with the balance', purchasePayments.totalsFor(4000, amountLedger).outstanding, 2500);
+  check('and settles in one tap',
+    await purchasePayments.settleRemainingPurchase(amountOnly.id, db), true);
+  amountLedger = await purchasePayments.listPurchasePayments(amountOnly.id, db);
+  check('leaving nothing owed',
+    purchasePayments.totalsFor(4000, amountLedger).outstanding, 0);
+
+  section('and counts in the vendor rollup');
+  // The rollup reads `purchases` and the payment subquery, never the items, so
+  // an amount-only purchase is a first-class row in it.
+  const rollupWithAmountOnly = await vendors.getVendorTotals(sharma.id, db);
+  check('its total is purchased', rollupWithAmountOnly.purchased >= 4000, true);
+  check('and its payments are paid', rollupWithAmountOnly.paid >= 4000, true);
+
+  section('a purchase whose lines are all free text moves nothing either');
+  const stockBefore = (await products.getProductById(cable.id, db)).stock_qty;
+  const looseOnly = await purchases.createPurchase(
+    {
+      vendor_id: patel.id,
+      date: at(2026, 9, 19),
+      total_amount: 600,
+      items: [line(null, 2, 300)],
+      // Answered yes, but there is no product behind the line to apply it to.
+      applyStock: true,
+      updateCostFor: [cable.id],
+    },
+    db
+  );
+  check('it saves with its line', looseOnly.items.length, 1);
+  check('stock is recorded as not applied', looseOnly.stock_applied, 0);
+  check('and nothing on the shelf moved',
+    (await products.getProductById(cable.id, db)).stock_qty, stockBefore);
+
+  section('deleting an amount-only purchase asks nothing about stock');
+  const shelfBefore = (await products.getProductById(cable.id, db)).stock_qty;
+  // reverseStock is passed TRUE, which is the worst case: the guard is
+  // `stock_applied === 1`, and it has to hold on its own.
+  await purchases.deletePurchase(amountOnly.id, { reverseStock: true }, db);
+  check('nothing comes off the shelf',
+    (await products.getProductById(cable.id, db)).stock_qty, shelfBefore);
+  check('and it leaves the lists',
+    (await purchases.listPurchases({ vendorId: sharma.id }, db))
+      .some((p) => p.id === amountOnly.id), false);
+  check('while its ledger survives the soft delete',
+    (await purchasePayments.listPurchasePayments(amountOnly.id, db)).length > 0, true);
+
   section('the payment ledger, through the shared core');
   check('a new purchase owes all of it',
     purchasePayments.totalsFor(6800, await purchasePayments.listPurchasePayments(withStock.id, db))
@@ -287,12 +373,18 @@ async function run({ check, section }) {
   section('finding a purchase');
   check('by the vendor’s own reference',
     (await purchases.listPurchases({ search: 'SE/2026' }, db)).map((p) => p.id), [withStock.id]);
-  check('by vendor name',
-    (await purchases.listPurchases({ search: 'Patel' }, db)).length, 2);
+  // Asserted as membership rather than a count: a raw total breaks the moment
+  // a fixture is added above, which is exactly what happened when the
+  // amount-only cases went in, and a test that fails for being edited teaches
+  // nothing.
+  const byName = await purchases.listPurchases({ search: 'Patel' }, db);
+  check('by vendor name finds some', byName.length > 0, true);
+  check('and only theirs', byName.every((p) => p.vendor_id === patel.id), true);
   check('by an item on it',
     (await purchases.listPurchases({ search: 'Dome' }, db)).length, 2);
-  check('scoped to one vendor',
-    (await purchases.listPurchases({ vendorId: patel.id }, db)).length, 2);
+  const scoped = await purchases.listPurchases({ vendorId: patel.id }, db);
+  check('scoped to one vendor', scoped.every((p) => p.vendor_id === patel.id), true);
+  check('and finds every live one of theirs', scoped.length, byName.length);
   check('newest first',
     (await purchases.listPurchases({ vendorId: sharma.id }, db)).map((p) => p.id),
     [withCost.id, withStock.id]);
@@ -336,6 +428,26 @@ async function run({ check, section }) {
   const spare = await vendors.createVendor({ name: 'Unused Supplier' }, db);
   await vendors.deleteVendor(spare.id, db);
   check('one with none can be', (await vendors.getVendorById(spare.id, db)), null);
+
+  section('the screens treat items as optional');
+  const newScreenOptional = readSourceWithoutComments('app/purchase/new.tsx');
+  // The modal asks two questions and both are about products in Inventory, so
+  // with nothing to ask it is skipped rather than shown empty.
+  check('saving skips the modal when no line has a product',
+    /confirmLines\.some\(\(line\) => line\.productId !== null\)/.test(newScreenOptional), true);
+  check('and saves without touching stock',
+    /save\(\{ applyStock: false, updateCostFor: \[\] \}\)/.test(newScreenOptional), true);
+  check('items no longer block the save',
+    /Add at least one item/.test(newScreenOptional), false);
+  check('and the section says it is optional',
+    newScreenOptional.includes('Items (optional)'), true);
+  // The cross-check is meaningless with nothing to add up.
+  check('the lines-vs-total check waits for lines',
+    /\{usableLines\.length > 0 \? \(/.test(newScreenOptional), true);
+
+  const detailOptional = readSourceWithoutComments('app/purchase/[id].tsx');
+  check('an empty item list says so in one line',
+    detailOptional.includes('No items recorded'), true);
 
   section('the screens are wired to the pieces above');
   // No renderer, so this reads source -- the same honest limit as every other
